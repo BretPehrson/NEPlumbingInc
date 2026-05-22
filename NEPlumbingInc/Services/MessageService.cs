@@ -69,7 +69,6 @@ public class MessageService(
         var cutoff = DateTime.UtcNow.Subtract(window);
         var normalizedName = NormalizeForDedup(form.Name);
         var normalizedEmail = NormalizeForDedup(form.Email);
-        var normalizedPhone = NormalizePhone(form.Phone);
         var normalizedMessage = NormalizeForDedup(form.Message);
 
         var recentCandidates = await context.Messages
@@ -86,7 +85,6 @@ public class MessageService(
         return recentCandidates.Any(m =>
             NormalizeForDedup(m.Name) == normalizedName
             && NormalizeForDedup(m.Email) == normalizedEmail
-            && NormalizePhone(m.Phone) == normalizedPhone
             && NormalizeForDedup(m.Message) == normalizedMessage);
     }
 
@@ -133,16 +131,6 @@ public class MessageService(
         }
 
         return string.Join(' ', input.Trim().ToLowerInvariant().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
-    }
-
-    private static string NormalizePhone(string? input)
-    {
-        if (string.IsNullOrWhiteSpace(input))
-        {
-            return string.Empty;
-        }
-
-        return new string(input.Where(char.IsDigit).ToArray());
     }
 
     public async Task AttachResumeAsync(int messageId, ResumeUploadResult resume, CancellationToken cancellationToken = default)
