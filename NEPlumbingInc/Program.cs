@@ -29,7 +29,16 @@ var connectionString =
         "DefaultConnection connection string not found.");
 
 builder.Services.AddDbContextFactory<AppDbContext>(options =>
-    options.UseSqlServer(connectionString));
+    options.UseSqlServer(
+        connectionString,
+        sqlOptions =>
+        {
+            sqlOptions.EnableRetryOnFailure(
+                maxRetryCount: 5,
+                maxRetryDelay: TimeSpan.FromSeconds(10),
+                errorNumbersToAdd: null);
+            sqlOptions.CommandTimeout(30);
+        }));
 
 builder.Services.AddCascadingAuthenticationState();
 
@@ -84,14 +93,7 @@ builder.Services.AddHttpClient("LocalApi", client =>
 var app = builder.Build();
 
 // Ensure database and apply migrations
-using (var scope = app.Services.CreateScope())
-{
-    var services = scope.ServiceProvider;
-    var contextFactory = services.GetRequiredService<IDbContextFactory<AppDbContext>>();
-    using var context = await contextFactory.CreateDbContextAsync();
-    await context.Database.MigrateAsync();
-    await SeedData.Initialize(services, context);
-}
+await InitializeDatabaseWithRetryAsync(app);
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
