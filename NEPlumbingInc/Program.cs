@@ -120,3 +120,41 @@ app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
 app.Run();
+
+static async Task InitializeDatabaseWithRetryAsync(WebApplication app)
+{
+    const int maxAttempts = 5;
+
+    for (var attempt = 1; attempt <= maxAttempts; attempt++)
+    {
+        try
+        {
+            using var scope = app.Services.CreateScope();
+            var services = scope.ServiceProvider;
+            var contextFactory = services.GetRequiredService<IDbContextFactory<AppDbContext>>();
+            using var context = await contextFactory.CreateDbContextAsync();
+
+            await context.Database.MigrateAsync();
+            await SeedData.Initialize(services, context);
+
+            app.Logger.LogInformation(
+                "Database initialization succeeded on attempt {Attempt}/{MaxAttempts}.",
+                attempt,
+                maxAttempts);
+            return;
+        }
+        catch (Exception ex) when (attempt < maxAttempts)
+        {
+            var delay = TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, attempt)));
+            app.Logger.LogWarning(
+                ex,
+                "Database initialization failed on attempt {Attempt}/{MaxAttempts}. Retrying in {DelaySeconds} seconds.",
+                attempt,
+                maxAttempts,
+                delay.TotalSeconds);
+            await Task.Delay(delay);
+        }
+    }
+
+    throw new InvalidOperationException("Database initialization failed after maximum retry attempts.");
+}
