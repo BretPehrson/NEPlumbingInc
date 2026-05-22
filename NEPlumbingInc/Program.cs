@@ -1,5 +1,25 @@
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    options.AddPolicy("FormSubmission", context =>
+    {
+        var ip = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+        return RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: ip,
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 5,
+                Window = TimeSpan.FromMinutes(10),
+                QueueLimit = 0,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst
+            });
+    });
+});
+
 // Add database context - use SQL Server for all environments
 var connectionString =
     builder.Configuration.GetConnectionString("DefaultConnection")
@@ -81,6 +101,8 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.MapControllers();
+
+app.UseRateLimiter();
 
 app.UseAuthentication();
 app.UseAuthorization();

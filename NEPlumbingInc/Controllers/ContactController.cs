@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using NEPlumbingInc.Models;
 using NEPlumbingInc.Services;
 
@@ -16,11 +17,19 @@ public class ContactController(
     private readonly IHttpContextAccessor _httpContextAccessor = httpContextAccessor;
 
     [HttpPost("/messages/submit")]
+    [EnableRateLimiting("FormSubmission")]
     public async Task<IActionResult> Submit(
         [FromForm] MessageFormModel form,
         [FromForm] string? source,
-        [FromForm] string? ip)
+        [FromForm] string? ip,
+        [FromForm] string? website)
     {
+        // Honeypot: real users never fill this field.
+        if (!string.IsNullOrWhiteSpace(website))
+        {
+            return Redirect("/messages?sent=1");
+        }
+
         if (!ModelState.IsValid)
         {
             return Redirect("/messages?error=1");
@@ -29,6 +38,12 @@ public class ContactController(
         try
         {
             var isSpecialOffer = string.Equals(source, "special-offer", StringComparison.OrdinalIgnoreCase);
+
+            var isDuplicate = await _messageService.IsRecentDuplicateAsync(form, isSpecialOffer, TimeSpan.FromHours(24));
+            if (isDuplicate)
+            {
+                return Redirect("/messages?sent=1");
+            }
 
             await _messageService.CreateMessageAsync(form, isSpecialOffer);
 
@@ -52,10 +67,18 @@ public class ContactController(
     }
 
     [HttpPost("/special-offer/claim")]
+    [EnableRateLimiting("FormSubmission")]
     public async Task<IActionResult> ClaimSpecialOffer(
         [FromForm] MessageFormModel form,
-        [FromForm] string? ip)
+        [FromForm] string? ip,
+        [FromForm] string? website)
     {
+        // Honeypot: real users never fill this field.
+        if (!string.IsNullOrWhiteSpace(website))
+        {
+            return Redirect("/special-offer?sent=1");
+        }
+
         if (!ModelState.IsValid)
         {
             return Redirect("/special-offer?error=1");
@@ -63,6 +86,12 @@ public class ContactController(
 
         try
         {
+            var isDuplicate = await _messageService.IsRecentDuplicateAsync(form, isSpecialOffer: true, TimeSpan.FromHours(24));
+            if (isDuplicate)
+            {
+                return Redirect("/special-offer?sent=1");
+            }
+
             var settings = await _specialOfferSettingsService.GetSettingsAsync();
             if (settings.RequireAddress)
             {

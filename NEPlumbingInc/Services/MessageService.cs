@@ -5,6 +5,7 @@ public interface IMessageService
     Task<List<MessageViewModel>> GetAllMessagesAsync();
     Task<MessageViewModel> GetMessageByIdAsync(int id);
     Task<int> GetUnreadCountAsync();
+    Task<bool> IsRecentDuplicateAsync(MessageFormModel form, bool isSpecialOffer, TimeSpan window);
     Task<MessageViewModel> CreateMessageAsync(MessageFormModel form, bool isSpecialOffer);
     Task AttachResumeAsync(int messageId, ResumeUploadResult resume, CancellationToken cancellationToken = default);
     Task MarkAsReadAsync(int id);
@@ -61,6 +62,34 @@ public class MessageService(
             ?? throw new KeyNotFoundException($"Message {id} not found");
     }
 
+    public async Task<bool> IsRecentDuplicateAsync(MessageFormModel form, bool isSpecialOffer, TimeSpan window)
+    {
+        using var context = await _contextFactory.CreateDbContextAsync();
+
+        var cutoff = DateTime.UtcNow.Subtract(window);
+        var normalizedName = NormalizeForDedup(form.Name);
+        var normalizedEmail = NormalizeForDedup(form.Email);
+        var normalizedPhone = NormalizePhone(form.Phone);
+        var normalizedMessage = NormalizeForDedup(form.Message);
+
+        var recentCandidates = await context.Messages
+            .Where(m => m.CreatedAt >= cutoff && m.IsSpecialOffer == isSpecialOffer)
+            .Select(m => new
+            {
+                m.Name,
+                m.Email,
+                m.Phone,
+                m.Message
+            })
+            .ToListAsync();
+
+        return recentCandidates.Any(m =>
+            NormalizeForDedup(m.Name) == normalizedName
+            && NormalizeForDedup(m.Email) == normalizedEmail
+            && NormalizePhone(m.Phone) == normalizedPhone
+            && NormalizeForDedup(m.Message) == normalizedMessage);
+    }
+
     public async Task<MessageViewModel> CreateMessageAsync(MessageFormModel form, bool isSpecialOffer)
     {
         using var context = await _contextFactory.CreateDbContextAsync();
@@ -94,6 +123,26 @@ public class MessageService(
         }
 
         return message;
+    }
+
+    private static string NormalizeForDedup(string? input)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return string.Empty;
+        }
+
+        return string.Join(' ', input.Trim().ToLowerInvariant().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+    }
+
+    private static string NormalizePhone(string? input)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return string.Empty;
+        }
+
+        return new string(input.Where(char.IsDigit).ToArray());
     }
 
     public async Task AttachResumeAsync(int messageId, ResumeUploadResult resume, CancellationToken cancellationToken = default)
