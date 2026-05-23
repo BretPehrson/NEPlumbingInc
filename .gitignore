@@ -1,0 +1,12 @@
+# Visual Studio workspace metadata
+.vs/
+
+# Build outputs
+**/bin/
+**/obj/
+
+# Publish artifacts
+publish/
+
+# Environment files
+.env
