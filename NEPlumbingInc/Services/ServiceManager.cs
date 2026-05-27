@@ -20,8 +20,8 @@ public class ServiceManager(IDbContextFactory<AppDbContext> contextFactory) : IS
     public async Task<List<ServicesFormModel>> GetAllServicesAsync()
     {
         using var context = await _contextFactory.CreateDbContextAsync();
-        return await context.Services
-            .Include(s => s.SubServices)
+        var services = await context.Services
+            .OrderBy(s => s.Id)
             .Select(s => new ServicesFormModel
             {
                 Id = s.Id,
@@ -31,26 +31,49 @@ public class ServiceManager(IDbContextFactory<AppDbContext> contextFactory) : IS
                 IsActive = s.IsActive,
                 CreatedAt = s.CreatedAt,
                 ConsultationType = s.ConsultationType,
-                SubServices = s.SubServices!
-                    .Select(sub => new SubServiceModel
-                    {
-                        Id = sub.Id,
-                        Name = sub.Name,
-                        Description = sub.Description,
-                        Price = sub.Price,
-                        ServiceId = sub.ServiceId
-                    })
-                    .ToList()
+                SubServices = new List<SubServiceModel>()
             })
             .ToListAsync();
+
+        if (services.Count == 0)
+        {
+            return services;
+        }
+
+        var serviceIds = services.Select(s => s.Id).ToList();
+        var subServices = await context.SubServices
+            .Where(sub => serviceIds.Contains(sub.ServiceId))
+            .OrderBy(sub => sub.Id)
+            .Select(sub => new SubServiceModel
+            {
+                Id = sub.Id,
+                Name = sub.Name,
+                Description = sub.Description,
+                Price = sub.Price,
+                ServiceId = sub.ServiceId
+            })
+            .ToListAsync();
+
+        var subServicesByServiceId = subServices
+            .GroupBy(sub => sub.ServiceId)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        foreach (var service in services)
+        {
+            service.SubServices = subServicesByServiceId.TryGetValue(service.Id, out var list)
+                ? list
+                : new List<SubServiceModel>();
+        }
+
+        return services;
     }
 
     public async Task<List<ServicesFormModel>> GetActiveServicesAsync()
     {
         using var context = await _contextFactory.CreateDbContextAsync();
-        return await context.Services
+        var services = await context.Services
             .Where(s => s.IsActive)
-            .Include(s => s.SubServices)
+            .OrderBy(s => s.Id)
             .Select(s => new ServicesFormModel
             {
                 Id = s.Id,
@@ -60,18 +83,41 @@ public class ServiceManager(IDbContextFactory<AppDbContext> contextFactory) : IS
                 IsActive = s.IsActive,
                 CreatedAt = s.CreatedAt,
                 ConsultationType = s.ConsultationType,
-                SubServices = s.SubServices!
-                    .Select(sub => new SubServiceModel
-                    {
-                        Id = sub.Id,
-                        Name = sub.Name,
-                        Description = sub.Description,
-                        Price = sub.Price,
-                        ServiceId = sub.ServiceId
-                    })
-                    .ToList()
+                SubServices = new List<SubServiceModel>()
             })
             .ToListAsync();
+
+        if (services.Count == 0)
+        {
+            return services;
+        }
+
+        var serviceIds = services.Select(s => s.Id).ToList();
+        var subServices = await context.SubServices
+            .Where(sub => serviceIds.Contains(sub.ServiceId))
+            .OrderBy(sub => sub.Id)
+            .Select(sub => new SubServiceModel
+            {
+                Id = sub.Id,
+                Name = sub.Name,
+                Description = sub.Description,
+                Price = sub.Price,
+                ServiceId = sub.ServiceId
+            })
+            .ToListAsync();
+
+        var subServicesByServiceId = subServices
+            .GroupBy(sub => sub.ServiceId)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        foreach (var service in services)
+        {
+            service.SubServices = subServicesByServiceId.TryGetValue(service.Id, out var list)
+                ? list
+                : new List<SubServiceModel>();
+        }
+
+        return services;
     }
 
     public async Task<ServicesFormModel> GetServiceByIdAsync(int id)
