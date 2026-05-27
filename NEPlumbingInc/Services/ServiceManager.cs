@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Caching.Memory;
+using SixLabors.ImageSharp.Processing;
+
 namespace NEPlumbingInc.Services;
 
 public interface IServiceManager
@@ -5,17 +8,26 @@ public interface IServiceManager
     Task<List<ServicesFormModel>> GetAllServicesAsync();
     Task<List<ServicesFormModel>> GetActiveServicesAsync();
     Task<ServicesFormModel> GetServiceByIdAsync(int id);
-    Task<ServiceImageData?> GetServiceImageAsync(int id);
+    Task<ServiceImageData?> GetServiceImageAsync(int id, ServiceImageSize size = ServiceImageSize.Original);
     Task<ServicesFormModel> CreateServiceAsync(ServicesFormModel service);
     Task<ServicesFormModel> UpdateServiceAsync(ServicesFormModel service);
     Task DeleteServiceAsync(int id);
 }
 
+public enum ServiceImageSize
+{
+    Original,
+    Card
+}
+
 public sealed record ServiceImageData(byte[] Bytes, string ContentType);
 
-public class ServiceManager(IDbContextFactory<AppDbContext> contextFactory) : IServiceManager
+public class ServiceManager(IDbContextFactory<AppDbContext> contextFactory, IMemoryCache cache) : IServiceManager
 {
     private readonly IDbContextFactory<AppDbContext> _contextFactory = contextFactory;
+    private readonly IMemoryCache _cache = cache;
+    private const int CardMaxDimension = 720;
+    private const int CardJpegQuality = 70;
 
     public async Task<List<ServicesFormModel>> GetAllServicesAsync()
     {
@@ -27,7 +39,7 @@ public class ServiceManager(IDbContextFactory<AppDbContext> contextFactory) : IS
                 Id = s.Id,
                 ServiceName = s.ServiceName,
                 ServiceDescription = s.ServiceDescription,
-                HasServiceImage = s.ServiceImage != null,
+                HasServiceImage = s.ServiceImage != null && s.ServiceImage.StartsWith("data:image/"),
                 IsActive = s.IsActive,
                 CreatedAt = s.CreatedAt,
                 ConsultationType = s.ConsultationType,
@@ -79,7 +91,7 @@ public class ServiceManager(IDbContextFactory<AppDbContext> contextFactory) : IS
                 Id = s.Id,
                 ServiceName = s.ServiceName,
                 ServiceDescription = s.ServiceDescription,
-                HasServiceImage = s.ServiceImage != null,
+                HasServiceImage = s.ServiceImage != null && s.ServiceImage.StartsWith("data:image/"),
                 IsActive = s.IsActive,
                 CreatedAt = s.CreatedAt,
                 ConsultationType = s.ConsultationType,
@@ -132,8 +144,14 @@ public class ServiceManager(IDbContextFactory<AppDbContext> contextFactory) : IS
         return service;
     }
 
-    public async Task<ServiceImageData?> GetServiceImageAsync(int id)
+    public async Task<ServiceImageData?> GetServiceImageAsync(int id, ServiceImageSize size = ServiceImageSize.Original)
     {
+        var cacheKey = $"service-image:{id}:{size}";
+        if (_cache.TryGetValue<ServiceImageData>(cacheKey, out var cached))
+        {
+            return cached;
+        }
+
         using var context = await _contextFactory.CreateDbContextAsync();
         var dataUri = await context.Services
             .Where(s => s.Id == id)
@@ -166,16 +184,52 @@ public class ServiceManager(IDbContextFactory<AppDbContext> contextFactory) : IS
         }
 
         var base64Payload = dataUri[(markerIndex + base64Marker.Length)..];
+        base64Payload = string.Concat(base64Payload.Where(c => !char.IsWhiteSpace(c))).Replace(" ", "+");
 
         try
         {
             var bytes = Convert.FromBase64String(base64Payload);
-            return new ServiceImageData(bytes, mimeType);
+            var imageData = size == ServiceImageSize.Card
+                ? CreateCardImage(bytes)
+                : new ServiceImageData(bytes, mimeType);
+
+            _cache.Set(
+                cacheKey,
+                imageData,
+                new MemoryCacheEntryOptions
+                {
+                    SlidingExpiration = TimeSpan.FromHours(2),
+                    AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(8)
+                });
+
+            return imageData;
         }
         catch (FormatException)
         {
             return null;
         }
+    }
+
+    private static ServiceImageData CreateCardImage(byte[] bytes)
+    {
+        using var image = SixLabors.ImageSharp.Image.Load(bytes);
+
+        if (image.Width > CardMaxDimension || image.Height > CardMaxDimension)
+        {
+            image.Mutate(x => x.Resize(new SixLabors.ImageSharp.Processing.ResizeOptions
+            {
+                Mode = SixLabors.ImageSharp.Processing.ResizeMode.Max,
+                Size = new SixLabors.ImageSharp.Size(CardMaxDimension, CardMaxDimension)
+            }));
+        }
+
+        using var output = new MemoryStream();
+        image.Save(output, new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder
+        {
+            Quality = CardJpegQuality
+        });
+
+        return new ServiceImageData(output.ToArray(), "image/jpeg");
     }
 
     public async Task<ServicesFormModel> CreateServiceAsync(ServicesFormModel model)
@@ -212,6 +266,8 @@ public class ServiceManager(IDbContextFactory<AppDbContext> contextFactory) : IS
         service.ServiceImage = model.ServiceImage;
         service.IsActive = model.IsActive;
         service.ConsultationType = model.ConsultationType;  // Add this line
+        _cache.Remove($"service-image:{service.Id}:{ServiceImageSize.Original}");
+        _cache.Remove($"service-image:{service.Id}:{ServiceImageSize.Card}");
 
         // Remove deleted sub-services
         var existingIds = service.SubServices!.Select(s => s.Id).ToList();
@@ -264,5 +320,7 @@ public class ServiceManager(IDbContextFactory<AppDbContext> contextFactory) : IS
 
         context.Services.Remove(service);
         await context.SaveChangesAsync();
+        _cache.Remove($"service-image:{id}:{ServiceImageSize.Original}");
+        _cache.Remove($"service-image:{id}:{ServiceImageSize.Card}");
     }
 }

@@ -8,15 +8,20 @@ namespace NEPlumbingInc.Controllers;
 public class ServiceImagesController(IServiceManager serviceManager) : ControllerBase
 {
     private readonly IServiceManager _serviceManager = serviceManager;
+    private static readonly byte[] TransparentGifPixel = Convert.FromBase64String("R0lGODlhAQABAIABAP///wAAACwAAAAAAQABAAACAkQBADs=");
 
     [HttpGet("{id:int}/image")]
-    [ResponseCache(Duration = 3600, Location = ResponseCacheLocation.Any)]
-    public async Task<IActionResult> GetImage(int id)
+    [ResponseCache(Duration = 86400, Location = ResponseCacheLocation.Any)]
+    public async Task<IActionResult> GetImage(int id, [FromQuery] string? size = null)
     {
-        var image = await _serviceManager.GetServiceImageAsync(id);
+        var imageSize = string.Equals(size, "card", StringComparison.OrdinalIgnoreCase)
+            ? ServiceImageSize.Card
+            : ServiceImageSize.Original;
+
+        var image = await _serviceManager.GetServiceImageAsync(id, imageSize);
         if (image is null)
         {
-            return NotFound();
+            return File(TransparentGifPixel, "image/gif");
         }
 
         return File(image.Bytes, image.ContentType);

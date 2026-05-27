@@ -21,12 +21,7 @@ builder.Services.AddRateLimiter(options =>
 });
 
 // Add database context - use SQL Server for all environments
-var connectionString =
-    builder.Configuration.GetConnectionString("DefaultConnection")
-    ?? builder.Configuration["ConnectionStrings__DefaultConnection"]
-    ?? builder.Configuration["DefaultConnection"]
-    ?? throw new InvalidOperationException(
-        "DefaultConnection connection string not found.");
+var (connectionString, connectionStringSource) = ResolveDefaultConnectionString(builder.Configuration);
 
 builder.Services.AddDbContextFactory<AppDbContext>(options =>
     options.UseSqlServer(
@@ -56,6 +51,7 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
 builder.Services.AddAuthorization();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddControllers();
+builder.Services.AddMemoryCache();
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
@@ -93,6 +89,10 @@ builder.Services.AddHttpClient("LocalApi", client =>
 
 var app = builder.Build();
 
+app.Logger.LogInformation(
+    "Resolved DefaultConnection from configuration key source: {ConnectionStringSource}.",
+    connectionStringSource);
+
 // Ensure database and apply migrations
 await InitializeDatabaseWithRetryAsync(app);
 
@@ -125,6 +125,7 @@ app.Run();
 static async Task InitializeDatabaseWithRetryAsync(WebApplication app)
 {
     const int maxAttempts = 5;
+    Exception? lastException = null;
 
     for (var attempt = 1; attempt <= maxAttempts; attempt++)
     {
@@ -146,6 +147,7 @@ static async Task InitializeDatabaseWithRetryAsync(WebApplication app)
         }
         catch (Exception ex) when (attempt < maxAttempts)
         {
+            lastException = ex;
             var delay = TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, attempt)));
             app.Logger.LogWarning(
                 ex,
@@ -155,7 +157,56 @@ static async Task InitializeDatabaseWithRetryAsync(WebApplication app)
                 delay.TotalSeconds);
             await Task.Delay(delay);
         }
+        catch (Exception ex)
+        {
+            lastException = ex;
+        }
     }
 
-    throw new InvalidOperationException("Database initialization failed after maximum retry attempts.");
+    app.Logger.LogError(
+        lastException,
+        "Database initialization failed after {MaxAttempts} attempts.",
+        maxAttempts);
+    throw new InvalidOperationException(
+        "Database initialization failed after maximum retry attempts.",
+        lastException);
+}
+
+static (string ConnectionString, string Source) ResolveDefaultConnectionString(IConfiguration configuration)
+{
+    var candidates = new (string Key, string? Value)[]
+    {
+        ("ConnectionStrings:DefaultConnection", configuration.GetConnectionString("DefaultConnection")),
+        ("ConnectionStrings:DefaultConnection", configuration["ConnectionStrings:DefaultConnection"]),
+        ("ConnectionStrings__DefaultConnection", configuration["ConnectionStrings__DefaultConnection"]),
+        ("DefaultConnection", configuration["DefaultConnection"]),
+        ("SQLAZURECONNSTR_DefaultConnection", configuration["SQLAZURECONNSTR_DefaultConnection"]),
+        ("SQLCONNSTR_DefaultConnection", configuration["SQLCONNSTR_DefaultConnection"]),
+        ("CUSTOMCONNSTR_DefaultConnection", configuration["CUSTOMCONNSTR_DefaultConnection"])
+    };
+
+    foreach (var candidate in candidates)
+    {
+        if (string.IsNullOrWhiteSpace(candidate.Value))
+        {
+            continue;
+        }
+
+        var value = candidate.Value.Trim();
+
+        if (value.Length >= 2 && value.StartsWith('"') && value.EndsWith('"'))
+        {
+            value = value[1..^1].Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            return (value, candidate.Key);
+        }
+    }
+
+    throw new InvalidOperationException(
+        "DefaultConnection connection string not found. Checked keys: " +
+        "ConnectionStrings:DefaultConnection, ConnectionStrings__DefaultConnection, DefaultConnection, " +
+        "SQLAZURECONNSTR_DefaultConnection, SQLCONNSTR_DefaultConnection, CUSTOMCONNSTR_DefaultConnection.");
 }

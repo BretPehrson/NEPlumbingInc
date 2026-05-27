@@ -248,7 +248,7 @@ else if (services.Count == 0)
                     @if (service.HasServiceImage)
                     {
                         <div class="image-container">
-                            <img src="/api/services/@service.Id/image"
+                               <img src="/api/services/@service.Id/image?size=card"
                                  class="service-image"
                                  alt="@service.ServiceName"
                                  loading="lazy"
