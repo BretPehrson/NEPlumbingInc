@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations.Schema;
+
 namespace NEPlumbingInc.Models;
 
 public enum ConsultationType
@@ -12,6 +14,8 @@ public class ServicesFormModel
     public string ServiceName { get; set; } = string.Empty;
     public string ServiceDescription { get; set; } = string.Empty;
     public string? ServiceImage { get; set; }
+    [NotMapped]
+    public bool HasServiceImage { get; set; }
     public bool IsActive { get; set; }
     public DateTime CreatedAt { get; set; }
     public ConsultationType ConsultationType { get; set; } = ConsultationType.Inspection;

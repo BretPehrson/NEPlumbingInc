@@ -1,6 +1,7 @@
-﻿@inject IHttpClientFactory HttpClientFactory
-@inject IJSRuntime JS
+﻿@inject IJSRuntime JS
 @rendermode InteractiveServer
+@using SixLabors.ImageSharp.Processing
+@using SixLabors.ImageSharp.Formats.Jpeg
 
 <div class="upload-container">
     <InputFile OnChange="HandleFileSelected" class="file-input" accept="image/*" />
@@ -48,35 +49,8 @@
     public EventCallback<string> OnImageUploaded { get; set; }
 
     private const long MaxFileSize = 5 * 1024 * 1024; // 5MB limit
-    private const int BufferSize = 4096; // Use smaller chunks for reading
-
-    private async Task OnFileSelected(InputFileChangeEventArgs e)
-    {
-        try 
-        {
-            var file = e.File;
-            var content = new MultipartFormDataContent();
-            content.Add(new StreamContent(file.OpenReadStream(10_000_000)), "file", file.Name);
-
-            var client = HttpClientFactory.CreateClient("LocalApi");
-            var response = await client.PostAsync("/api/upload", content);
-            var imagePath = await response.Content.ReadAsStringAsync();
-
-            if (response.IsSuccessStatusCode)
-            {
-                ImagePath = imagePath;
-                await ImagePathChanged.InvokeAsync(imagePath);
-            }
-            else
-            {
-                Console.Error.WriteLine($"Image upload failed: {await response.Content.ReadAsStringAsync()}");
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"Upload error: {ex.Message}");
-        }
-    }
+    private const int MaxImageDimension = 1600;
+    private const int JpegQuality = 75;
 
     private async Task HandleFileSelected(InputFileChangeEventArgs e)
     {
@@ -91,31 +65,31 @@
                     return;
                 }
 
-                // Create a MemoryStream to ensure complete file reading
-                using var memoryStream = new MemoryStream();
-                await using var stream = file.OpenReadStream(maxAllowedSize: MaxFileSize);
-                
-                // Read file in chunks
-                var buffer = new byte[BufferSize];
-                int bytesRead;
-                while ((bytesRead = await stream.ReadAsync(buffer)) > 0)
+                await using var inputStream = file.OpenReadStream(maxAllowedSize: MaxFileSize);
+                using var image = await SixLabors.ImageSharp.Image.LoadAsync(inputStream);
+
+                if (image.Width > MaxImageDimension || image.Height > MaxImageDimension)
                 {
-                    await memoryStream.WriteAsync(buffer.AsMemory(0, bytesRead));
+                    var resize = new SixLabors.ImageSharp.Processing.ResizeOptions
+                    {
+                        Mode = SixLabors.ImageSharp.Processing.ResizeMode.Max,
+                        Size = new SixLabors.ImageSharp.Size(MaxImageDimension, MaxImageDimension)
+                    };
+
+                    image.Mutate(x => x.Resize(resize));
                 }
 
-                // Convert to base64
-                var imageBytes = memoryStream.ToArray();
-                var base64Image = $"data:{file.ContentType};base64,{Convert.ToBase64String(imageBytes)}";
+                using var compressedStream = new MemoryStream();
+                var encoder = new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder
+                {
+                    Quality = JpegQuality
+                };
 
-                // Verify the image data is complete
-                if (memoryStream.Length == file.Size)
-                {
-                    await OnImageUploaded.InvokeAsync(base64Image);
-                }
-                else
-                {
-                    throw new InvalidOperationException("File upload incomplete");
-                }
+                await image.SaveAsync(compressedStream, encoder);
+                var compressedBytes = compressedStream.ToArray();
+
+                var base64Image = $"data:image/jpeg;base64,{Convert.ToBase64String(compressedBytes)}";
+                await OnImageUploaded.InvokeAsync(base64Image);
             }
         }
         catch (Exception ex)

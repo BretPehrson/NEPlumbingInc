@@ -125,9 +125,9 @@
                     {
                         <tr>
                             <td>
-                                @if (!string.IsNullOrEmpty(svc.ServiceImage))
+                                @if (svc.HasServiceImage)
                                 {
-                                    <img src="@svc.ServiceImage" alt="Service" style="height: 40px;" class="rounded" />
+                                    <img src="/api/services/@svc.Id/image" alt="Service" style="height: 40px;" class="rounded" loading="lazy" decoding="async" />
                                 }
                             </td>
                             <td>@svc.ServiceName</td>
@@ -139,7 +139,7 @@
                             </td>
                             <td>@svc.CreatedAt.ToShortDateString()</td>
                             <td>
-                                <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => EditService(svc)">
+                                <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => EditServiceAsync(svc.Id)">
                                     <i class="fas fa-edit"></i>
                                 </button>
                                 <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteService(svc.Id)">
@@ -336,20 +336,24 @@
         isEditing = false;
     }
 
-    private void EditService(ServicesFormModel service)
+    private async Task EditServiceAsync(int serviceId)
     {
+        var service = await ServiceManager.GetServiceByIdAsync(serviceId);
+
         editService = new ServicesFormModel
         {
             Id = service.Id,
             ServiceName = service.ServiceName,
             ServiceDescription = service.ServiceDescription,
             ServiceImage = service.ServiceImage,
+            HasServiceImage = service.HasServiceImage,
             IsActive = service.IsActive,
             ConsultationType = service.ConsultationType,
             SubServices = service.SubServices?.ToList() ?? new List<SubServiceModel>()
         };
         showModal = true;
         isEditing = true;
+        await InvokeAsync(StateHasChanged);
     }
 
     private void CloseModal()

@@ -218,18 +218,34 @@
 
 <h1 class="text-center mb-5">NE Plumbing Services</h1>
 
+@if (!string.IsNullOrWhiteSpace(loadError))
+{
+    <div class="alert alert-warning" role="alert">
+        @loadError
+    </div>
+}
+
+@if (services.Count == 0)
+{
+    <div class="alert alert-info" role="alert">
+        No services are currently available.
+    </div>
+}
+
 <div class="container">
     <div class="row">
         @foreach (var service in services)
         {
             <div class="col-md-4 mb-4">
                 <div class="card service-card h-100 shadow-sm" role="button" tabindex="0" onclick="window.NePlumbingShowServiceModal && window.NePlumbingShowServiceModal(@service.Id)">
-                    @if (!string.IsNullOrEmpty(service.ServiceImage))
+                    @if (service.HasServiceImage)
                     {
                         <div class="image-container">
-                            <img src="@service.ServiceImage" 
-                                 class="service-image" 
-                                 alt="@service.ServiceName" />
+                            <img src="/api/services/@service.Id/image"
+                                 class="service-image"
+                                 alt="@service.ServiceName"
+                                 loading="lazy"
+                                 decoding="async" />
                         </div>
                     }
                     else
@@ -325,9 +341,26 @@
 
 @code {
     private List<ServicesFormModel> services = new();
+    private string? loadError;
 
     protected override async Task OnInitializedAsync()
     {
-        services = await ServiceManager.GetActiveServicesAsync();
+        try
+        {
+            services = await ServiceManager.GetActiveServicesAsync();
+            loadError = null;
+        }
+        catch
+        {
+            loadError = "Services could not be loaded normally. Showing fallback results.";
+
+            var allServices = await ServiceManager.GetAllServicesAsync();
+            services = allServices.Where(s => s.IsActive).ToList();
+
+            if (services.Count == 0)
+            {
+                services = allServices;
+            }
+        }
     }
 }

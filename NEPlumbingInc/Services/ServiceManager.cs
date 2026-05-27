@@ -5,10 +5,13 @@ public interface IServiceManager
     Task<List<ServicesFormModel>> GetAllServicesAsync();
     Task<List<ServicesFormModel>> GetActiveServicesAsync();
     Task<ServicesFormModel> GetServiceByIdAsync(int id);
+    Task<ServiceImageData?> GetServiceImageAsync(int id);
     Task<ServicesFormModel> CreateServiceAsync(ServicesFormModel service);
     Task<ServicesFormModel> UpdateServiceAsync(ServicesFormModel service);
     Task DeleteServiceAsync(int id);
 }
+
+public sealed record ServiceImageData(byte[] Bytes, string ContentType);
 
 public class ServiceManager(IDbContextFactory<AppDbContext> contextFactory) : IServiceManager
 {
@@ -24,7 +27,7 @@ public class ServiceManager(IDbContextFactory<AppDbContext> contextFactory) : IS
                 Id = s.Id,
                 ServiceName = s.ServiceName,
                 ServiceDescription = s.ServiceDescription,
-                ServiceImage = s.ServiceImage,
+                HasServiceImage = s.ServiceImage != null,
                 IsActive = s.IsActive,
                 CreatedAt = s.CreatedAt,
                 ConsultationType = s.ConsultationType,
@@ -53,7 +56,7 @@ public class ServiceManager(IDbContextFactory<AppDbContext> contextFactory) : IS
                 Id = s.Id,
                 ServiceName = s.ServiceName,
                 ServiceDescription = s.ServiceDescription,
-                ServiceImage = s.ServiceImage,
+                HasServiceImage = s.ServiceImage != null,
                 IsActive = s.IsActive,
                 CreatedAt = s.CreatedAt,
                 ConsultationType = s.ConsultationType,
@@ -74,9 +77,59 @@ public class ServiceManager(IDbContextFactory<AppDbContext> contextFactory) : IS
     public async Task<ServicesFormModel> GetServiceByIdAsync(int id)
     {
         using var context = await _contextFactory.CreateDbContextAsync();
-        var service = await context.Services.FindAsync(id)
+        var service = await context.Services
+            .Include(s => s.SubServices)
+            .FirstOrDefaultAsync(s => s.Id == id)
             ?? throw new KeyNotFoundException($"Service with ID {id} not found.");
+
+        service.HasServiceImage = service.ServiceImage != null;
         return service;
+    }
+
+    public async Task<ServiceImageData?> GetServiceImageAsync(int id)
+    {
+        using var context = await _contextFactory.CreateDbContextAsync();
+        var dataUri = await context.Services
+            .Where(s => s.Id == id)
+            .Select(s => s.ServiceImage)
+            .FirstOrDefaultAsync();
+
+        if (string.IsNullOrWhiteSpace(dataUri))
+        {
+            return null;
+        }
+
+        const string dataPrefix = "data:";
+        const string base64Marker = ";base64,";
+
+        if (!dataUri.StartsWith(dataPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var markerIndex = dataUri.IndexOf(base64Marker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0)
+        {
+            return null;
+        }
+
+        var mimeType = dataUri[dataPrefix.Length..markerIndex].Trim();
+        if (string.IsNullOrWhiteSpace(mimeType))
+        {
+            mimeType = "image/jpeg";
+        }
+
+        var base64Payload = dataUri[(markerIndex + base64Marker.Length)..];
+
+        try
+        {
+            var bytes = Convert.FromBase64String(base64Payload);
+            return new ServiceImageData(bytes, mimeType);
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
     }
 
     public async Task<ServicesFormModel> CreateServiceAsync(ServicesFormModel model)
