@@ -79,6 +79,7 @@ builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<IColorSettingsService, ColorSettingsService>();
 builder.Services.AddScoped<IWebsiteMetricsService, WebsiteMetricsService>();
 builder.Services.AddScoped<IMessageNotificationSettingsService, MessageNotificationSettingsService>();
+builder.Services.AddScoped<ISpamFilterService, SpamFilterService>();
 builder.Services.AddScoped<DarkModeService>();
 builder.Services.AddScoped<ThemeService>();
 builder.Services.AddScoped<HomePageContentService>();

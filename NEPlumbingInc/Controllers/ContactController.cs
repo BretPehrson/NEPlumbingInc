@@ -9,19 +9,22 @@ public class ContactController(
     IMessageService messageService,
     ISpecialOfferService specialOfferService,
     ISpecialOfferSettingsService specialOfferSettingsService,
-    IHttpContextAccessor httpContextAccessor) : Controller
+    IHttpContextAccessor httpContextAccessor,
+    ISpamFilterService spamFilterService,
+    ILogger<ContactController> logger) : Controller
 {
     private readonly IMessageService _messageService = messageService;
     private readonly ISpecialOfferService _specialOfferService = specialOfferService;
     private readonly ISpecialOfferSettingsService _specialOfferSettingsService = specialOfferSettingsService;
     private readonly IHttpContextAccessor _httpContextAccessor = httpContextAccessor;
+    private readonly ISpamFilterService _spamFilterService = spamFilterService;
+    private readonly ILogger<ContactController> _logger = logger;
 
     [HttpPost("/messages/submit")]
     [EnableRateLimiting("FormSubmission")]
     public async Task<IActionResult> Submit(
         [FromForm] MessageFormModel form,
         [FromForm] string? source,
-        [FromForm] string? ip,
         [FromForm] string? website)
     {
         // Honeypot: real users never fill this field.
@@ -33,6 +36,15 @@ public class ContactController(
         if (!ModelState.IsValid)
         {
             return Redirect("/messages?error=1");
+        }
+
+        var spamCheck = _spamFilterService.Check(form);
+        if (spamCheck.IsSpam)
+        {
+            _logger.LogInformation(
+                "Blocked likely spam contact form submission. Reason={Reason}",
+                spamCheck.Reason ?? "unknown");
+            return Redirect("/messages?sent=1");
         }
 
         try
@@ -49,8 +61,7 @@ public class ContactController(
 
             if (isSpecialOffer)
             {
-                var submissionIp = ip
-                    ?? _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString();
+                var submissionIp = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString();
 
                 if (!string.IsNullOrWhiteSpace(submissionIp))
                 {
@@ -70,7 +81,6 @@ public class ContactController(
     [EnableRateLimiting("FormSubmission")]
     public async Task<IActionResult> ClaimSpecialOffer(
         [FromForm] MessageFormModel form,
-        [FromForm] string? ip,
         [FromForm] string? website)
     {
         // Honeypot: real users never fill this field.
@@ -82,6 +92,15 @@ public class ContactController(
         if (!ModelState.IsValid)
         {
             return Redirect("/special-offer?error=1");
+        }
+
+        var spamCheck = _spamFilterService.Check(form);
+        if (spamCheck.IsSpam)
+        {
+            _logger.LogInformation(
+                "Blocked likely spam special offer submission. Reason={Reason}",
+                spamCheck.Reason ?? "unknown");
+            return Redirect("/special-offer?sent=1");
         }
 
         try
@@ -106,8 +125,7 @@ public class ContactController(
 
             await _messageService.CreateMessageAsync(form, isSpecialOffer: true);
 
-            var submissionIp = ip
-                ?? _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString();
+            var submissionIp = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString();
 
             if (!string.IsNullOrWhiteSpace(submissionIp))
             {
