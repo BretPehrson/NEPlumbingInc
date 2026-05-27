@@ -1,4 +1,5 @@
 ﻿@page "/services"
+@rendermode InteractiveServer
 @inject IServiceManager ServiceManager
 
 <style>
@@ -225,7 +226,13 @@
     </div>
 }
 
-@if (services.Count == 0)
+@if (isLoading)
+{
+    <div class="alert alert-info" role="status" aria-live="polite">
+        Loading services...
+    </div>
+}
+else if (services.Count == 0)
 {
     <div class="alert alert-info" role="alert">
         No services are currently available.
@@ -342,8 +349,15 @@
 @code {
     private List<ServicesFormModel> services = new();
     private string? loadError;
+    private bool isLoading = true;
 
-    protected override async Task OnInitializedAsync()
+    protected override Task OnInitializedAsync()
+    {
+        _ = LoadServicesAsync();
+        return Task.CompletedTask;
+    }
+
+    private async Task LoadServicesAsync()
     {
         try
         {
@@ -361,6 +375,11 @@
             {
                 services = allServices;
             }
+        }
+        finally
+        {
+            isLoading = false;
+            await InvokeAsync(StateHasChanged);
         }
     }
 }
