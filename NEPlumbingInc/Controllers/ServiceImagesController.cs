@@ -12,13 +12,9 @@ public class ServiceImagesController(IServiceManager serviceManager) : Controlle
 
     [HttpGet("{id:int}/image")]
     [ResponseCache(Duration = 86400, Location = ResponseCacheLocation.Any)]
-    public async Task<IActionResult> GetImage(int id, [FromQuery] string? size = null)
+    public async Task<IActionResult> GetImage(int id)
     {
-        var imageSize = string.Equals(size, "card", StringComparison.OrdinalIgnoreCase)
-            ? ServiceImageSize.Card
-            : ServiceImageSize.Original;
-
-        var image = await _serviceManager.GetServiceImageAsync(id, imageSize);
+        var image = await _serviceManager.GetServiceImageAsync(id);
         if (image is null)
         {
             return File(TransparentGifPixel, "image/gif");

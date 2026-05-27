@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Caching.Memory;
-using SixLabors.ImageSharp.Processing;
 
 namespace NEPlumbingInc.Services;
 
@@ -8,16 +7,10 @@ public interface IServiceManager
     Task<List<ServicesFormModel>> GetAllServicesAsync();
     Task<List<ServicesFormModel>> GetActiveServicesAsync();
     Task<ServicesFormModel> GetServiceByIdAsync(int id);
-    Task<ServiceImageData?> GetServiceImageAsync(int id, ServiceImageSize size = ServiceImageSize.Original);
+    Task<ServiceImageData?> GetServiceImageAsync(int id);
     Task<ServicesFormModel> CreateServiceAsync(ServicesFormModel service);
     Task<ServicesFormModel> UpdateServiceAsync(ServicesFormModel service);
     Task DeleteServiceAsync(int id);
-}
-
-public enum ServiceImageSize
-{
-    Original,
-    Card
 }
 
 public sealed record ServiceImageData(byte[] Bytes, string ContentType);
@@ -26,8 +19,6 @@ public class ServiceManager(IDbContextFactory<AppDbContext> contextFactory, IMem
 {
     private readonly IDbContextFactory<AppDbContext> _contextFactory = contextFactory;
     private readonly IMemoryCache _cache = cache;
-    private const int CardMaxDimension = 720;
-    private const int CardJpegQuality = 70;
 
     public async Task<List<ServicesFormModel>> GetAllServicesAsync()
     {
@@ -144,9 +135,9 @@ public class ServiceManager(IDbContextFactory<AppDbContext> contextFactory, IMem
         return service;
     }
 
-    public async Task<ServiceImageData?> GetServiceImageAsync(int id, ServiceImageSize size = ServiceImageSize.Original)
+    public async Task<ServiceImageData?> GetServiceImageAsync(int id)
     {
-        var cacheKey = $"service-image:{id}:{size}";
+        var cacheKey = $"service-image:{id}";
         if (_cache.TryGetValue<ServiceImageData>(cacheKey, out var cached))
         {
             return cached;
@@ -189,9 +180,7 @@ public class ServiceManager(IDbContextFactory<AppDbContext> contextFactory, IMem
         try
         {
             var bytes = Convert.FromBase64String(base64Payload);
-            var imageData = size == ServiceImageSize.Card
-                ? CreateCardImage(bytes)
-                : new ServiceImageData(bytes, mimeType);
+            var imageData = new ServiceImageData(bytes, mimeType);
 
             _cache.Set(
                 cacheKey,
@@ -208,28 +197,6 @@ public class ServiceManager(IDbContextFactory<AppDbContext> contextFactory, IMem
         {
             return null;
         }
-    }
-
-    private static ServiceImageData CreateCardImage(byte[] bytes)
-    {
-        using var image = SixLabors.ImageSharp.Image.Load(bytes);
-
-        if (image.Width > CardMaxDimension || image.Height > CardMaxDimension)
-        {
-            image.Mutate(x => x.Resize(new SixLabors.ImageSharp.Processing.ResizeOptions
-            {
-                Mode = SixLabors.ImageSharp.Processing.ResizeMode.Max,
-                Size = new SixLabors.ImageSharp.Size(CardMaxDimension, CardMaxDimension)
-            }));
-        }
-
-        using var output = new MemoryStream();
-        image.Save(output, new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder
-        {
-            Quality = CardJpegQuality
-        });
-
-        return new ServiceImageData(output.ToArray(), "image/jpeg");
     }
 
     public async Task<ServicesFormModel> CreateServiceAsync(ServicesFormModel model)
@@ -266,8 +233,7 @@ public class ServiceManager(IDbContextFactory<AppDbContext> contextFactory, IMem
         service.ServiceImage = model.ServiceImage;
         service.IsActive = model.IsActive;
         service.ConsultationType = model.ConsultationType;  // Add this line
-        _cache.Remove($"service-image:{service.Id}:{ServiceImageSize.Original}");
-        _cache.Remove($"service-image:{service.Id}:{ServiceImageSize.Card}");
+        _cache.Remove($"service-image:{service.Id}");
 
         // Remove deleted sub-services
         var existingIds = service.SubServices!.Select(s => s.Id).ToList();
@@ -320,7 +286,6 @@ public class ServiceManager(IDbContextFactory<AppDbContext> contextFactory, IMem
 
         context.Services.Remove(service);
         await context.SaveChangesAsync();
-        _cache.Remove($"service-image:{id}:{ServiceImageSize.Original}");
-        _cache.Remove($"service-image:{id}:{ServiceImageSize.Card}");
+        _cache.Remove($"service-image:{id}");
     }
 }
