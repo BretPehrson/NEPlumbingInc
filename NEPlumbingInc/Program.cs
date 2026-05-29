@@ -93,8 +93,19 @@ app.Logger.LogInformation(
     "Resolved DefaultConnection from configuration key source: {ConnectionStringSource}.",
     connectionStringSource);
 
-// Ensure database and apply migrations
-await InitializeDatabaseWithRetryAsync(app);
+// Run database initialization in the background so Azure can bring the site up
+// even when SQL is slow or temporarily unavailable.
+_ = Task.Run(async () =>
+{
+    try
+    {
+        await InitializeDatabaseWithRetryAsync(app);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "Database initialization failed in the background. The app will continue running without applying migrations.");
+    }
+});
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
