@@ -71,6 +71,7 @@ builder.Services.AddScoped<ISpecialOfferSettingsService, SpecialOfferSettingsSer
 builder.Services.AddScoped<ICareersPageSettingsService, CareersPageSettingsService>();
 builder.Services.AddScoped<IMessageService, MessageService>();
 builder.Services.AddScoped<IResumeStorageService, ResumeStorageService>();
+builder.Services.AddScoped<IServiceImageStorageService, ServiceImageStorageService>();
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<IColorSettingsService, ColorSettingsService>();
 builder.Services.AddScoped<IWebsiteMetricsService, WebsiteMetricsService>();
@@ -100,6 +101,7 @@ _ = Task.Run(async () =>
     try
     {
         await InitializeDatabaseWithRetryAsync(app);
+        await BackfillLegacyServiceImagesToBlobAsync(app);
     }
     catch (Exception ex)
     {
@@ -181,6 +183,123 @@ static async Task InitializeDatabaseWithRetryAsync(WebApplication app)
     throw new InvalidOperationException(
         "Database initialization failed after maximum retry attempts.",
         lastException);
+}
+
+static async Task BackfillLegacyServiceImagesToBlobAsync(WebApplication app)
+{
+    var isEnabled = app.Configuration.GetValue<bool>("ServiceImageBlobStorage:BackfillOnStartup");
+    if (!isEnabled)
+    {
+        return;
+    }
+
+    var batchSize = app.Configuration.GetValue<int?>("ServiceImageBlobStorage:BackfillBatchSize") ?? 25;
+    if (batchSize <= 0)
+    {
+        batchSize = 25;
+    }
+
+    app.Logger.LogInformation("Service image blob backfill enabled. Starting migration of legacy base64 service images in batches of {BatchSize}.", batchSize);
+
+    using var scope = app.Services.CreateScope();
+    var contextFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+    var serviceImageStorage = scope.ServiceProvider.GetRequiredService<IServiceImageStorageService>();
+    using var context = await contextFactory.CreateDbContextAsync();
+
+    var migratedCount = 0;
+    var failedCount = 0;
+
+    while (true)
+    {
+        var services = await context.Services
+            .Where(s => s.ServiceImageBlobName == null && s.ServiceImage != null && s.ServiceImage.StartsWith("data:"))
+            .OrderBy(s => s.Id)
+            .Take(batchSize)
+            .ToListAsync();
+
+        if (services.Count == 0)
+        {
+            break;
+        }
+
+        foreach (var service in services)
+        {
+            try
+            {
+                if (!TryParseServiceImageDataUri(service.ServiceImage, out var bytes, out var contentType))
+                {
+                    failedCount++;
+                    app.Logger.LogWarning("Skipping service {ServiceId}: legacy ServiceImage value is not a valid base64 data URI.", service.Id);
+                    continue;
+                }
+
+                var upload = await serviceImageStorage.UploadServiceImageAsync(service.Id, bytes, contentType);
+                service.ServiceImageBlobName = upload.BlobName;
+                service.ServiceImageContentType = upload.ContentType;
+                service.ServiceImage = null;
+
+                await context.SaveChangesAsync();
+                migratedCount++;
+            }
+            catch (Exception ex)
+            {
+                failedCount++;
+                app.Logger.LogError(ex, "Failed migrating service image for service {ServiceId}.", service.Id);
+                context.Entry(service).State = EntityState.Unchanged;
+            }
+        }
+
+        context.ChangeTracker.Clear();
+    }
+
+    app.Logger.LogInformation(
+        "Service image blob backfill completed. Migrated: {MigratedCount}, Failed: {FailedCount}.",
+        migratedCount,
+        failedCount);
+}
+
+static bool TryParseServiceImageDataUri(string? dataUri, out byte[] bytes, out string contentType)
+{
+    bytes = Array.Empty<byte>();
+    contentType = "image/jpeg";
+
+    if (string.IsNullOrWhiteSpace(dataUri))
+    {
+        return false;
+    }
+
+    const string dataPrefix = "data:";
+    const string base64Marker = ";base64,";
+
+    if (!dataUri.StartsWith(dataPrefix, StringComparison.OrdinalIgnoreCase))
+    {
+        return false;
+    }
+
+    var markerIndex = dataUri.IndexOf(base64Marker, StringComparison.OrdinalIgnoreCase);
+    if (markerIndex < 0)
+    {
+        return false;
+    }
+
+    var detectedContentType = dataUri[dataPrefix.Length..markerIndex].Trim();
+    if (!string.IsNullOrWhiteSpace(detectedContentType))
+    {
+        contentType = detectedContentType;
+    }
+
+    var base64Payload = dataUri[(markerIndex + base64Marker.Length)..];
+    base64Payload = string.Concat(base64Payload.Where(c => !char.IsWhiteSpace(c))).Replace(" ", "+");
+
+    try
+    {
+        bytes = Convert.FromBase64String(base64Payload);
+        return bytes.Length > 0;
+    }
+    catch (FormatException)
+    {
+        return false;
+    }
 }
 
 static (string ConnectionString, string Source) ResolveDefaultConnectionString(IConfiguration configuration)

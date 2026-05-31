@@ -15,10 +15,14 @@ public interface IServiceManager
 
 public sealed record ServiceImageData(byte[] Bytes, string ContentType);
 
-public class ServiceManager(IDbContextFactory<AppDbContext> contextFactory, IMemoryCache cache) : IServiceManager
+public class ServiceManager(
+    IDbContextFactory<AppDbContext> contextFactory,
+    IMemoryCache cache,
+    IServiceImageStorageService serviceImageStorage) : IServiceManager
 {
     private readonly IDbContextFactory<AppDbContext> _contextFactory = contextFactory;
     private readonly IMemoryCache _cache = cache;
+    private readonly IServiceImageStorageService _serviceImageStorage = serviceImageStorage;
 
     public async Task<List<ServicesFormModel>> GetAllServicesAsync()
     {
@@ -30,7 +34,8 @@ public class ServiceManager(IDbContextFactory<AppDbContext> contextFactory, IMem
                 Id = s.Id,
                 ServiceName = s.ServiceName,
                 ServiceDescription = s.ServiceDescription,
-                HasServiceImage = s.ServiceImage != null && s.ServiceImage.StartsWith("data:image/"),
+                HasServiceImage = !string.IsNullOrWhiteSpace(s.ServiceImageBlobName)
+                    || (s.ServiceImage != null && s.ServiceImage.StartsWith("data:image/")),
                 IsActive = s.IsActive,
                 CreatedAt = s.CreatedAt,
                 ConsultationType = s.ConsultationType,
@@ -82,7 +87,8 @@ public class ServiceManager(IDbContextFactory<AppDbContext> contextFactory, IMem
                 Id = s.Id,
                 ServiceName = s.ServiceName,
                 ServiceDescription = s.ServiceDescription,
-                HasServiceImage = s.ServiceImage != null && s.ServiceImage.StartsWith("data:image/"),
+                HasServiceImage = !string.IsNullOrWhiteSpace(s.ServiceImageBlobName)
+                    || (s.ServiceImage != null && s.ServiceImage.StartsWith("data:image/")),
                 IsActive = s.IsActive,
                 CreatedAt = s.CreatedAt,
                 ConsultationType = s.ConsultationType,
@@ -131,7 +137,14 @@ public class ServiceManager(IDbContextFactory<AppDbContext> contextFactory, IMem
             .FirstOrDefaultAsync(s => s.Id == id)
             ?? throw new KeyNotFoundException($"Service with ID {id} not found.");
 
-        service.HasServiceImage = service.ServiceImage != null;
+        service.HasServiceImage = !string.IsNullOrWhiteSpace(service.ServiceImageBlobName)
+            || !string.IsNullOrWhiteSpace(service.ServiceImage);
+
+        if (!string.IsNullOrWhiteSpace(service.ServiceImageBlobName))
+        {
+            service.ServiceImage = $"/api/services/{service.Id}/image";
+        }
+
         return service;
     }
 
@@ -144,11 +157,51 @@ public class ServiceManager(IDbContextFactory<AppDbContext> contextFactory, IMem
         }
 
         using var context = await _contextFactory.CreateDbContextAsync();
-        var dataUri = await context.Services
+        var imageRef = await context.Services
             .Where(s => s.Id == id)
-            .Select(s => s.ServiceImage)
+            .Select(s => new
+            {
+                s.ServiceImage,
+                s.ServiceImageBlobName,
+                s.ServiceImageContentType
+            })
             .FirstOrDefaultAsync();
 
+        if (imageRef is null)
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(imageRef.ServiceImageBlobName))
+        {
+            try
+            {
+                var (content, contentType) = await _serviceImageStorage.OpenServiceImageReadAsync(imageRef.ServiceImageBlobName);
+                await using (content)
+                {
+                    using var memory = new MemoryStream();
+                    await content.CopyToAsync(memory);
+                    var blobImageData = new ServiceImageData(memory.ToArray(), string.IsNullOrWhiteSpace(contentType) ? "image/jpeg" : contentType);
+
+                    _cache.Set(
+                        cacheKey,
+                        blobImageData,
+                        new MemoryCacheEntryOptions
+                        {
+                            SlidingExpiration = TimeSpan.FromHours(2),
+                            AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(8)
+                        });
+
+                    return blobImageData;
+                }
+            }
+            catch (FileNotFoundException)
+            {
+                return null;
+            }
+        }
+
+        var dataUri = imageRef.ServiceImage;
         if (string.IsNullOrWhiteSpace(dataUri))
         {
             return null;
@@ -206,14 +259,29 @@ public class ServiceManager(IDbContextFactory<AppDbContext> contextFactory, IMem
         {
             ServiceName = model.ServiceName,
             ServiceDescription = model.ServiceDescription,
-            ServiceImage = model.ServiceImage,
             IsActive = model.IsActive,
             CreatedAt = DateTime.UtcNow,
+            ConsultationType = model.ConsultationType,
             SubServices = model.SubServices ?? new List<SubServiceModel>()
         };
 
         context.Services.Add(service);
         await context.SaveChangesAsync();
+
+        // After SaveChanges, we have a stable service ID for deterministic blob paths.
+        if (TryParseDataUri(model.ServiceImage, out var uploadedImage))
+        {
+            var upload = await _serviceImageStorage.UploadServiceImageAsync(
+                service.Id,
+                uploadedImage.Bytes,
+                uploadedImage.ContentType);
+
+            service.ServiceImageBlobName = upload.BlobName;
+            service.ServiceImageContentType = upload.ContentType;
+            service.ServiceImage = null;
+            await context.SaveChangesAsync();
+        }
+
         return service;
     }
 
@@ -230,10 +298,38 @@ public class ServiceManager(IDbContextFactory<AppDbContext> contextFactory, IMem
         // Update main service properties
         service.ServiceName = model.ServiceName;
         service.ServiceDescription = model.ServiceDescription;
-        service.ServiceImage = model.ServiceImage;
         service.IsActive = model.IsActive;
-        service.ConsultationType = model.ConsultationType;  // Add this line
+        service.ConsultationType = model.ConsultationType;
         _cache.Remove($"service-image:{service.Id}");
+
+        // Null indicates explicit remove in admin UI. Non-data URIs are treated as preview-only values.
+        if (model.ServiceImage is null)
+        {
+            if (!string.IsNullOrWhiteSpace(service.ServiceImageBlobName))
+            {
+                await _serviceImageStorage.DeleteServiceImageAsync(service.ServiceImageBlobName);
+            }
+
+            service.ServiceImageBlobName = null;
+            service.ServiceImageContentType = null;
+            service.ServiceImage = null;
+        }
+        else if (TryParseDataUri(model.ServiceImage, out var uploadedImage))
+        {
+            if (!string.IsNullOrWhiteSpace(service.ServiceImageBlobName))
+            {
+                await _serviceImageStorage.DeleteServiceImageAsync(service.ServiceImageBlobName);
+            }
+
+            var upload = await _serviceImageStorage.UploadServiceImageAsync(
+                service.Id,
+                uploadedImage.Bytes,
+                uploadedImage.ContentType);
+
+            service.ServiceImageBlobName = upload.BlobName;
+            service.ServiceImageContentType = upload.ContentType;
+            service.ServiceImage = null;
+        }
 
         // Remove deleted sub-services
         var existingIds = service.SubServices!.Select(s => s.Id).ToList();
@@ -284,8 +380,55 @@ public class ServiceManager(IDbContextFactory<AppDbContext> contextFactory, IMem
         var service = await context.Services.FindAsync(id)
             ?? throw new KeyNotFoundException($"Service with ID {id} not found.");
 
+        if (!string.IsNullOrWhiteSpace(service.ServiceImageBlobName))
+        {
+            await _serviceImageStorage.DeleteServiceImageAsync(service.ServiceImageBlobName);
+        }
+
         context.Services.Remove(service);
         await context.SaveChangesAsync();
         _cache.Remove($"service-image:{id}");
+    }
+
+    private static bool TryParseDataUri(string? dataUri, out ServiceImageData image)
+    {
+        image = default!;
+        if (string.IsNullOrWhiteSpace(dataUri))
+        {
+            return false;
+        }
+
+        const string dataPrefix = "data:";
+        const string base64Marker = ";base64,";
+
+        if (!dataUri.StartsWith(dataPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var markerIndex = dataUri.IndexOf(base64Marker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0)
+        {
+            return false;
+        }
+
+        var mimeType = dataUri[dataPrefix.Length..markerIndex].Trim();
+        if (string.IsNullOrWhiteSpace(mimeType))
+        {
+            mimeType = "image/jpeg";
+        }
+
+        var base64Payload = dataUri[(markerIndex + base64Marker.Length)..];
+        base64Payload = string.Concat(base64Payload.Where(c => !char.IsWhiteSpace(c))).Replace(" ", "+");
+
+        try
+        {
+            image = new ServiceImageData(Convert.FromBase64String(base64Payload), mimeType);
+            return true;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
     }
 }
