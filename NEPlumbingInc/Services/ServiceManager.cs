@@ -34,8 +34,7 @@ public class ServiceManager(
                 Id = s.Id,
                 ServiceName = s.ServiceName,
                 ServiceDescription = s.ServiceDescription,
-                HasServiceImage = !string.IsNullOrWhiteSpace(s.ServiceImageBlobName)
-                    || (s.ServiceImage != null && s.ServiceImage.StartsWith("data:image/")),
+                HasServiceImage = !string.IsNullOrWhiteSpace(s.ServiceImageBlobName),
                 IsActive = s.IsActive,
                 CreatedAt = s.CreatedAt,
                 ConsultationType = s.ConsultationType,
@@ -87,8 +86,7 @@ public class ServiceManager(
                 Id = s.Id,
                 ServiceName = s.ServiceName,
                 ServiceDescription = s.ServiceDescription,
-                HasServiceImage = !string.IsNullOrWhiteSpace(s.ServiceImageBlobName)
-                    || (s.ServiceImage != null && s.ServiceImage.StartsWith("data:image/")),
+                HasServiceImage = !string.IsNullOrWhiteSpace(s.ServiceImageBlobName),
                 IsActive = s.IsActive,
                 CreatedAt = s.CreatedAt,
                 ConsultationType = s.ConsultationType,
@@ -137,13 +135,7 @@ public class ServiceManager(
             .FirstOrDefaultAsync(s => s.Id == id)
             ?? throw new KeyNotFoundException($"Service with ID {id} not found.");
 
-        service.HasServiceImage = !string.IsNullOrWhiteSpace(service.ServiceImageBlobName)
-            || !string.IsNullOrWhiteSpace(service.ServiceImage);
-
-        if (!string.IsNullOrWhiteSpace(service.ServiceImageBlobName))
-        {
-            service.ServiceImage = $"/api/services/{service.Id}/image";
-        }
+        service.HasServiceImage = !string.IsNullOrWhiteSpace(service.ServiceImageBlobName);
 
         return service;
     }
@@ -161,92 +153,38 @@ public class ServiceManager(
             .Where(s => s.Id == id)
             .Select(s => new
             {
-                s.ServiceImage,
                 s.ServiceImageBlobName,
                 s.ServiceImageContentType
             })
             .FirstOrDefaultAsync();
 
-        if (imageRef is null)
+        if (imageRef is null || string.IsNullOrWhiteSpace(imageRef.ServiceImageBlobName))
         {
             return null;
         }
-
-        if (!string.IsNullOrWhiteSpace(imageRef.ServiceImageBlobName))
-        {
-            try
-            {
-                var (content, contentType) = await _serviceImageStorage.OpenServiceImageReadAsync(imageRef.ServiceImageBlobName);
-                await using (content)
-                {
-                    using var memory = new MemoryStream();
-                    await content.CopyToAsync(memory);
-                    var blobImageData = new ServiceImageData(memory.ToArray(), string.IsNullOrWhiteSpace(contentType) ? "image/jpeg" : contentType);
-
-                    _cache.Set(
-                        cacheKey,
-                        blobImageData,
-                        new MemoryCacheEntryOptions
-                        {
-                            SlidingExpiration = TimeSpan.FromHours(2),
-                            AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(8)
-                        });
-
-                    return blobImageData;
-                }
-            }
-            catch (FileNotFoundException)
-            {
-                return null;
-            }
-        }
-
-        var dataUri = imageRef.ServiceImage;
-        if (string.IsNullOrWhiteSpace(dataUri))
-        {
-            return null;
-        }
-
-        const string dataPrefix = "data:";
-        const string base64Marker = ";base64,";
-
-        if (!dataUri.StartsWith(dataPrefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-
-        var markerIndex = dataUri.IndexOf(base64Marker, StringComparison.OrdinalIgnoreCase);
-        if (markerIndex < 0)
-        {
-            return null;
-        }
-
-        var mimeType = dataUri[dataPrefix.Length..markerIndex].Trim();
-        if (string.IsNullOrWhiteSpace(mimeType))
-        {
-            mimeType = "image/jpeg";
-        }
-
-        var base64Payload = dataUri[(markerIndex + base64Marker.Length)..];
-        base64Payload = string.Concat(base64Payload.Where(c => !char.IsWhiteSpace(c))).Replace(" ", "+");
 
         try
         {
-            var bytes = Convert.FromBase64String(base64Payload);
-            var imageData = new ServiceImageData(bytes, mimeType);
+            var (content, contentType) = await _serviceImageStorage.OpenServiceImageReadAsync(imageRef.ServiceImageBlobName);
+            await using (content)
+            {
+                using var memory = new MemoryStream();
+                await content.CopyToAsync(memory);
+                var blobImageData = new ServiceImageData(memory.ToArray(), string.IsNullOrWhiteSpace(contentType) ? "image/jpeg" : contentType);
 
-            _cache.Set(
-                cacheKey,
-                imageData,
-                new MemoryCacheEntryOptions
-                {
-                    SlidingExpiration = TimeSpan.FromHours(2),
-                    AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(8)
-                });
+                _cache.Set(
+                    cacheKey,
+                    blobImageData,
+                    new MemoryCacheEntryOptions
+                    {
+                        SlidingExpiration = TimeSpan.FromHours(2),
+                        AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(8)
+                    });
 
-            return imageData;
+                return blobImageData;
+            }
         }
-        catch (FormatException)
+        catch (FileNotFoundException)
         {
             return null;
         }
@@ -312,7 +250,6 @@ public class ServiceManager(
 
             service.ServiceImageBlobName = null;
             service.ServiceImageContentType = null;
-            service.ServiceImage = null;
         }
         else if (TryParseDataUri(model.ServiceImage, out var uploadedImage))
         {
@@ -328,11 +265,9 @@ public class ServiceManager(
 
             service.ServiceImageBlobName = upload.BlobName;
             service.ServiceImageContentType = upload.ContentType;
-            service.ServiceImage = null;
         }
 
         // Remove deleted sub-services
-        var existingIds = service.SubServices!.Select(s => s.Id).ToList();
         var updatedIds = model.SubServices?.Select(s => s.Id).ToList() ?? new List<int>();
         var toRemove = service.SubServices!.Where(s => !updatedIds.Contains(s.Id)).ToList();
         

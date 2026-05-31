@@ -10,3 +10,6 @@ publish/
 
 # Environment files
 .env
+
+# Service images stored locally during development
+ServiceImages/

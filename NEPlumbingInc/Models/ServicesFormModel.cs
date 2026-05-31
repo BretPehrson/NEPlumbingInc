@@ -13,9 +13,10 @@ public class ServicesFormModel
     public int Id { get; set; }
     public string ServiceName { get; set; } = string.Empty;
     public string ServiceDescription { get; set; } = string.Empty;
-    public string? ServiceImage { get; set; }
     public string? ServiceImageBlobName { get; set; }
     public string? ServiceImageContentType { get; set; }
+    [NotMapped]
+    public string? ServiceImage { get; set; } // Preview only - not stored in DB
     [NotMapped]
     public bool HasServiceImage { get; set; }
     public bool IsActive { get; set; }
