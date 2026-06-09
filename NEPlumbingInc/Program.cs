@@ -87,16 +87,11 @@ builder.Services.AddScoped<IColorSettingsService, ColorSettingsService>();
 builder.Services.AddScoped<IWebsiteMetricsService, WebsiteMetricsService>();
 builder.Services.AddScoped<IMessageNotificationSettingsService, MessageNotificationSettingsService>();
 builder.Services.AddScoped<ISpamFilterService, SpamFilterService>();
-builder.Services.AddScoped<DarkModeService>();
 builder.Services.AddScoped<ThemeService>();
 builder.Services.AddScoped<HomePageContentService>();
 builder.Services.Configure<EmailSettings>(
     builder.Configuration.GetSection("Email"));
 builder.Services.AddScoped<IEmailService, EmailService>();
-builder.Services.AddHttpClient("LocalApi", client =>
-{
-    client.BaseAddress = new Uri("https://localhost:7162");
-});
 
 var app = builder.Build();
 
