@@ -55,6 +55,8 @@
                     }
 
                     <form method="post" action="/careers/submit" class="mt-4 needs-validation" novalidate data-nep-validate="true" enctype="multipart/form-data">
+                        <input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden;" />
+                        <input type="text" name="companyWebsite" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden;" />
                         <div class="row g-3">
                             <div class="col-md-6">
                                 <label class="form-label">Full name</label>
@@ -77,7 +79,8 @@
 
                             <div class="col-md-6">
                                 <label class="form-label">Years of experience (optional)</label>
-                                <input class="form-control" name="YearsExperience" placeholder="e.g., 3" />
+                                <input class="form-control" name="YearsExperience" type="number" inputmode="numeric" min="0" step="1" data-nep-numeric="true" placeholder="e.g., 3" />
+                                <div class="invalid-feedback">Please enter a valid number.</div>
                             </div>
                             <div class="col-md-6 d-flex align-items-end">
                                 <div class="form-check">

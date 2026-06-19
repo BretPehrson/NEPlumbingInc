@@ -495,8 +495,69 @@
                         input.addEventListener('blur', () => validatePhoneInput(input));
                     });
 
+                    // Email validation: validate on input and on blur, and include in submit checks.
+                    const validateEmailInput = (input) => {
+                        if (!input) return;
+
+                        const raw = (input.value || '').trim();
+                        if (!raw) {
+                            input.setCustomValidity('');
+                            return;
+                        }
+
+                        // Basic, practical email pattern: local@domain.tld (not fully RFC, but robust)
+                        const re = /^[^\s@@]+@@[^\s@@]+\.[^\s@@]+$/;
+                        if (!re.test(raw)) {
+                            input.setCustomValidity('Please enter a valid email address');
+                        } else {
+                            input.setCustomValidity('');
+                        }
+                    };
+
+                    const emailInputs = form.querySelectorAll('input[type="email"]');
+                    emailInputs.forEach(input => {
+                        validateEmailInput(input);
+                        input.addEventListener('input', () => validateEmailInput(input));
+                        input.addEventListener('blur', () => validateEmailInput(input));
+                    });
+
+                    // Numeric validation: integers only (e.g., Years of experience)
+                    const validateNumericInput = (input) => {
+                        if (!input) return;
+
+                        const raw = (input.value || '').trim();
+                        if (!raw) {
+                            input.setCustomValidity('');
+                            return;
+                        }
+
+                        if (!/^\d+$/.test(raw)) {
+                            input.setCustomValidity('Please enter a valid number');
+                            return;
+                        }
+
+                        const val = parseInt(raw, 10);
+                        const min = input.hasAttribute('min') ? parseInt(input.getAttribute('min'), 10) : Number.NEGATIVE_INFINITY;
+                        const max = input.hasAttribute('max') ? parseInt(input.getAttribute('max'), 10) : Number.POSITIVE_INFINITY;
+
+                        if (Number.isNaN(val) || val < min || val > max) {
+                            input.setCustomValidity('Please enter a valid number');
+                        } else {
+                            input.setCustomValidity('');
+                        }
+                    };
+
+                    const numericInputs = form.querySelectorAll('input[data-nep-numeric="true"]');
+                    numericInputs.forEach(input => {
+                        validateNumericInput(input);
+                        input.addEventListener('input', () => validateNumericInput(input));
+                        input.addEventListener('blur', () => validateNumericInput(input));
+                    });
+
                     form.addEventListener('submit', (event) => {
                         phoneInputs.forEach(input => validatePhoneInput(input));
+                        emailInputs.forEach(input => validateEmailInput(input));
+                        numericInputs.forEach(input => validateNumericInput(input));
 
                         if (!form.checkValidity()) {
                             event.preventDefault();

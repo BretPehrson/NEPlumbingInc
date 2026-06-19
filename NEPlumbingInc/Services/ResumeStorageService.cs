@@ -180,7 +180,7 @@ public class ResumeStorageService(IConfiguration configuration) : IResumeStorage
             var resp = await blobClient.DeleteIfExistsAsync(DeleteSnapshotsOption.IncludeSnapshots, cancellationToken: cancellationToken);
             return resp.Value;
         }
-        catch (RequestFailedException ex)
+        catch (RequestFailedException)
         {
             // Log if needed by caller; return false to indicate not deleted
             return false;

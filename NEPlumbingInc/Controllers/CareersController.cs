@@ -21,9 +21,33 @@ public class CareersController(
     [HttpPost("/careers/submit")]
     [RequestFormLimits(MultipartBodyLengthLimit = 10_485_760)]
     [RequestSizeLimit(10_485_760)]
-    public async Task<IActionResult> Submit([FromForm] JobApplicationFormModel form, [FromForm] IFormFile? resume)
+    public async Task<IActionResult> Submit([FromForm] JobApplicationFormModel form, [FromForm] IFormFile? resume, [FromForm] string? website, [FromForm] string? companyWebsite)
     {
         var traceId = HttpContext.TraceIdentifier;
+
+        // Honeypot: real users never fill these hidden fields.
+        if (!string.IsNullOrWhiteSpace(website)
+            || !string.IsNullOrWhiteSpace(companyWebsite))
+        {
+            var messageText = BuildApplicationMessage(form);
+
+            var messageForm = new MessageFormModel
+            {
+                Name = form.Name,
+                Email = form.Email,
+                Phone = form.Phone,
+                Message = messageText
+            };
+
+            await _messageService.CreateMessageAsync(
+                messageForm,
+                isSpecialOffer: false,
+                isSpam: true,
+                spamReason: "honeypot-filled",
+                sendEmailNotification: false);
+
+            return Redirect("/careers?sent=1");
+        }
 
         if (!ModelState.IsValid)
         {
