@@ -2,7 +2,7 @@ namespace NEPlumbingInc.Services;
 
 public interface IEmailService
 {
-    Task SendNewMessageNotificationAsync(MessageFormModel model, bool isSpecialOffer);
+    Task SendNewMessageNotificationAsync(MessageFormModel model, bool isSpecialOffer, bool isPotentialSpam = false, string? spamReason = null);
 }
 
 public class EmailService(
@@ -12,7 +12,11 @@ public class EmailService(
     private readonly EmailSettings _settings = options.Value;
     private readonly IMessageNotificationSettingsService _messageNotificationSettingsService = messageNotificationSettingsService;
 
-    public async Task SendNewMessageNotificationAsync(MessageFormModel model, bool isSpecialOffer)
+    public async Task SendNewMessageNotificationAsync(
+        MessageFormModel model,
+        bool isSpecialOffer,
+        bool isPotentialSpam = false,
+        string? spamReason = null)
     {
         if (string.IsNullOrWhiteSpace(_settings.From)
             || string.IsNullOrWhiteSpace(_settings.AppPassword))
@@ -45,12 +49,17 @@ public class EmailService(
 
         var addressBlock = BuildAddressBlock(model);
         var sourceLabel = isSpecialOffer ? "Special Offer" : "Contact";
+        var spamSubjectPrefix = isPotentialSpam ? "[POTENTIAL SPAM] " : string.Empty;
+        var spamBanner = isPotentialSpam
+            ? $"POTENTIAL SPAM{(string.IsNullOrWhiteSpace(spamReason) ? string.Empty : $" ({spamReason})")}\n\n"
+            : string.Empty;
 
         var mail = new MailMessage
         {
             From = new MailAddress(_settings.From),
-            Subject = $"New {sourceLabel} message from {model.Name}",
+            Subject = $"{spamSubjectPrefix}New {sourceLabel} message from {model.Name}",
             Body =
+                spamBanner +
                 $"Name: {model.Name}\n" +
                 $"Email: {model.Email}\n" +
                 $"Phone: {model.Phone}\n" +

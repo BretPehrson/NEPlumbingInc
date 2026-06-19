@@ -9,6 +9,7 @@ public interface IMessageService
     Task<MessageViewModel> CreateMessageAsync(MessageFormModel form, bool isSpecialOffer, bool isSpam = false, string? spamReason = null, bool sendEmailNotification = true);
     Task AttachResumeAsync(int messageId, ResumeUploadResult resume, CancellationToken cancellationToken = default);
     Task PromoteFromSpamAsync(int id);
+    Task MarkAsSpamAsync(int id, string reason = "manual-review");
     Task<int> BackfillSpamMessagesAsync();
     Task MarkAsReadAsync(int id);
     Task DeleteMessageAsync(int id);
@@ -134,7 +135,11 @@ public class MessageService(
             // Email notifications are best-effort; never fail message creation if SMTP fails.
             try
             {
-                await _emailService.SendNewMessageNotificationAsync(form, isSpecialOffer);
+                await _emailService.SendNewMessageNotificationAsync(
+                    form,
+                    isSpecialOffer,
+                    isPotentialSpam: isSpam,
+                    spamReason: spamReason);
             }
             catch (Exception ex)
             {
@@ -183,6 +188,24 @@ public class MessageService(
         var split = message.Message.Split("\n\n", 2, StringSplitOptions.None);
         message.Message = split.Length == 2 ? split[1] : message.Message;
         message.IsRead = false;
+
+        await context.SaveChangesAsync();
+    }
+
+    public async Task MarkAsSpamAsync(int id, string reason = "manual-review")
+    {
+        using var context = await _contextFactory.CreateDbContextAsync();
+        var message = await context.Messages.FindAsync(id)
+            ?? throw new KeyNotFoundException($"Message {id} not found");
+
+        if (message.Message.StartsWith(SpamPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var reasonLabel = string.IsNullOrWhiteSpace(reason) ? "manual-review" : reason.Trim();
+        message.Message = $"{SpamPrefix} reason={reasonLabel}\n\n{message.Message}";
+        message.IsRead = true;
 
         await context.SaveChangesAsync();
     }

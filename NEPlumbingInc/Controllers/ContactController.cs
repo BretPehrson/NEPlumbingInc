@@ -25,11 +25,20 @@ public class ContactController(
     public async Task<IActionResult> Submit(
         [FromForm] MessageFormModel form,
         [FromForm] string? source,
-        [FromForm] string? website)
+        [FromForm] string? website,
+        [FromForm] string? companyWebsite)
     {
-        // Honeypot: real users never fill this field.
-        if (!string.IsNullOrWhiteSpace(website))
+        // Honeypot: real users never fill these hidden fields.
+        if (!string.IsNullOrWhiteSpace(website)
+            || !string.IsNullOrWhiteSpace(companyWebsite))
         {
+            await _messageService.CreateMessageAsync(
+                form,
+                isSpecialOffer: string.Equals(source, "special-offer", StringComparison.OrdinalIgnoreCase),
+                isSpam: true,
+                spamReason: "honeypot-filled",
+                sendEmailNotification: false);
+
             return Redirect("/messages?sent=1");
         }
 
@@ -50,7 +59,7 @@ public class ContactController(
                 isSpecialOffer: string.Equals(source, "special-offer", StringComparison.OrdinalIgnoreCase),
                 isSpam: true,
                 spamReason: spamCheck.Reason,
-                sendEmailNotification: false);
+                sendEmailNotification: true);
 
             return Redirect("/messages?sent=1");
         }
@@ -89,11 +98,20 @@ public class ContactController(
     [EnableRateLimiting("FormSubmission")]
     public async Task<IActionResult> ClaimSpecialOffer(
         [FromForm] MessageFormModel form,
-        [FromForm] string? website)
+        [FromForm] string? website,
+        [FromForm] string? companyWebsite)
     {
-        // Honeypot: real users never fill this field.
-        if (!string.IsNullOrWhiteSpace(website))
+        // Honeypot: real users never fill these hidden fields.
+        if (!string.IsNullOrWhiteSpace(website)
+            || !string.IsNullOrWhiteSpace(companyWebsite))
         {
+            await _messageService.CreateMessageAsync(
+                form,
+                isSpecialOffer: true,
+                isSpam: true,
+                spamReason: "honeypot-filled",
+                sendEmailNotification: false);
+
             return Redirect("/special-offer?sent=1");
         }
 
@@ -114,7 +132,7 @@ public class ContactController(
                 isSpecialOffer: true,
                 isSpam: true,
                 spamReason: spamCheck.Reason,
-                sendEmailNotification: false);
+                sendEmailNotification: true);
 
             return Redirect("/special-offer?sent=1");
         }
