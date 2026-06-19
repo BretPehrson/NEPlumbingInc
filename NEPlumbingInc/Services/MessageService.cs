@@ -6,8 +6,10 @@ public interface IMessageService
     Task<MessageViewModel> GetMessageByIdAsync(int id);
     Task<int> GetUnreadCountAsync();
     Task<bool> IsRecentDuplicateAsync(MessageFormModel form, bool isSpecialOffer, TimeSpan window);
-    Task<MessageViewModel> CreateMessageAsync(MessageFormModel form, bool isSpecialOffer);
+    Task<MessageViewModel> CreateMessageAsync(MessageFormModel form, bool isSpecialOffer, bool isSpam = false, string? spamReason = null, bool sendEmailNotification = true);
     Task AttachResumeAsync(int messageId, ResumeUploadResult resume, CancellationToken cancellationToken = default);
+    Task PromoteFromSpamAsync(int id);
+    Task<int> BackfillSpamMessagesAsync();
     Task MarkAsReadAsync(int id);
     Task DeleteMessageAsync(int id);
 }
@@ -15,16 +17,20 @@ public interface IMessageService
 public class MessageService(
     IDbContextFactory<AppDbContext> contextFactory,
     IEmailService emailService,
+    ISpamFilterService spamFilterService,
     ILogger<MessageService> logger) : IMessageService
 {
+    public const string SpamPrefix = "[SPAM]";
+
     private readonly IDbContextFactory<AppDbContext> _contextFactory = contextFactory;
     private readonly IEmailService _emailService = emailService;
+    private readonly ISpamFilterService _spamFilterService = spamFilterService;
     private readonly ILogger<MessageService> _logger = logger;
 
     public async Task<int> GetUnreadCountAsync()
     {
         using var context = await _contextFactory.CreateDbContextAsync();
-        return await context.Messages.CountAsync(m => !m.IsRead);
+        return await context.Messages.CountAsync(m => !m.IsRead && !m.Message.StartsWith(SpamPrefix));
     }
 
     public async Task<List<MessageViewModel>> GetAllMessagesAsync()
@@ -88,9 +94,22 @@ public class MessageService(
             && NormalizeForDedup(m.Message) == normalizedMessage);
     }
 
-    public async Task<MessageViewModel> CreateMessageAsync(MessageFormModel form, bool isSpecialOffer)
+    public async Task<MessageViewModel> CreateMessageAsync(
+        MessageFormModel form,
+        bool isSpecialOffer,
+        bool isSpam = false,
+        string? spamReason = null,
+        bool sendEmailNotification = true)
     {
         using var context = await _contextFactory.CreateDbContextAsync();
+
+        var messageBody = form.Message;
+        if (isSpam)
+        {
+            var reasonLabel = string.IsNullOrWhiteSpace(spamReason) ? "unknown" : spamReason.Trim();
+            messageBody = $"{SpamPrefix} reason={reasonLabel}\n\n{form.Message}";
+        }
+
         var message = new MessageViewModel
         {
             Name = form.Name,
@@ -101,7 +120,7 @@ public class MessageService(
             City = form.City,
             State = form.State,
             ZipCode = form.ZipCode,
-            Message = form.Message,
+            Message = messageBody,
             CreatedAt = DateTime.UtcNow,
             IsSpecialOffer = isSpecialOffer,
             IsRead = false
@@ -110,14 +129,17 @@ public class MessageService(
         context.Messages.Add(message);
         await context.SaveChangesAsync();
 
-        // Email notifications are best-effort; never fail message creation if SMTP fails.
-        try
+        if (sendEmailNotification)
         {
-            await _emailService.SendNewMessageNotificationAsync(form, isSpecialOffer);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to send new message email notification. MessageId={MessageId}", message.Id);
+            // Email notifications are best-effort; never fail message creation if SMTP fails.
+            try
+            {
+                await _emailService.SendNewMessageNotificationAsync(form, isSpecialOffer);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to send new message email notification. MessageId={MessageId}", message.Id);
+            }
         }
 
         return message;
@@ -145,6 +167,70 @@ public class MessageService(
         message.ResumeSizeBytes = resume.SizeBytes;
 
         await context.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task PromoteFromSpamAsync(int id)
+    {
+        using var context = await _contextFactory.CreateDbContextAsync();
+        var message = await context.Messages.FindAsync(id)
+            ?? throw new KeyNotFoundException($"Message {id} not found");
+
+        if (!message.Message.StartsWith(SpamPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var split = message.Message.Split("\n\n", 2, StringSplitOptions.None);
+        message.Message = split.Length == 2 ? split[1] : message.Message;
+        message.IsRead = false;
+
+        await context.SaveChangesAsync();
+    }
+
+    public async Task<int> BackfillSpamMessagesAsync()
+    {
+        using var context = await _contextFactory.CreateDbContextAsync();
+
+        var candidates = await context.Messages
+            .Where(m => !m.Message.StartsWith(SpamPrefix))
+            .Select(m => new
+            {
+                Entity = m,
+                Form = new MessageFormModel
+                {
+                    Name = m.Name,
+                    Email = m.Email,
+                    Phone = m.Phone,
+                    AddressLine1 = m.AddressLine1,
+                    AddressLine2 = m.AddressLine2,
+                    City = m.City,
+                    State = m.State,
+                    ZipCode = m.ZipCode,
+                    Message = m.Message
+                }
+            })
+            .ToListAsync();
+
+        var updatedCount = 0;
+
+        foreach (var candidate in candidates)
+        {
+            var spamCheck = _spamFilterService.Check(candidate.Form);
+            if (!spamCheck.IsSpam)
+            {
+                continue;
+            }
+
+            candidate.Entity.Message = $"{SpamPrefix} reason={spamCheck.Reason ?? "unknown"}\n\n{candidate.Entity.Message}";
+            updatedCount++;
+        }
+
+        if (updatedCount > 0)
+        {
+            await context.SaveChangesAsync();
+        }
+
+        return updatedCount;
     }
 
     public async Task MarkAsReadAsync(int id)

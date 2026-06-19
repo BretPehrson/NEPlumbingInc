@@ -42,8 +42,16 @@ public class ContactController(
         if (spamCheck.IsSpam)
         {
             _logger.LogInformation(
-                "Blocked likely spam contact form submission. Reason={Reason}",
+                "Flagged likely spam contact form submission. Reason={Reason}",
                 spamCheck.Reason ?? "unknown");
+
+            await _messageService.CreateMessageAsync(
+                form,
+                isSpecialOffer: string.Equals(source, "special-offer", StringComparison.OrdinalIgnoreCase),
+                isSpam: true,
+                spamReason: spamCheck.Reason,
+                sendEmailNotification: false);
+
             return Redirect("/messages?sent=1");
         }
 
@@ -98,8 +106,16 @@ public class ContactController(
         if (spamCheck.IsSpam)
         {
             _logger.LogInformation(
-                "Blocked likely spam special offer submission. Reason={Reason}",
+                "Flagged likely spam special offer submission. Reason={Reason}",
                 spamCheck.Reason ?? "unknown");
+
+            await _messageService.CreateMessageAsync(
+                form,
+                isSpecialOffer: true,
+                isSpam: true,
+                spamReason: spamCheck.Reason,
+                sendEmailNotification: false);
+
             return Redirect("/special-offer?sent=1");
         }
 

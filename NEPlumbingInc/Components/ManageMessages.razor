@@ -40,6 +40,9 @@
 <div class="card shadow-sm manage-messages">
     <div class="card-header d-flex justify-content-between align-items-center">
         <h5 class="mb-0">Messages</h5>
+        <button type="button" class="btn btn-sm btn-outline-warning" @onclick="BackfillSpamQueue">
+            Backfill Spam Queue
+        </button>
     </div>
     <div class="card-body">
         <div class="border rounded p-3 mb-3">
@@ -89,7 +92,7 @@
                     </tr>
                 </thead>
                 <tbody>
-                    @foreach (var message in messages)
+                    @foreach (var message in inboxMessages)
                     {
                         <tr class="@(!message.IsRead ? "table-info" : "")">
                             <td>@message.CreatedAt.ToLocalTime().ToString("g")</td>
@@ -135,6 +138,52 @@
                 </tbody>
             </table>
         </div>
+
+        @if (spamMessages.Count > 0)
+        {
+            <div class="mt-4">
+                <h6 class="mb-2">Spam Queue (@spamMessages.Count)</h6>
+                <div class="table-responsive">
+                    <table class="table table-striped table-sm">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Name</th>
+                                <th>Email</th>
+                                <th>Reason</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var message in spamMessages)
+                            {
+                                <tr>
+                                    <td>@message.CreatedAt.ToLocalTime().ToString("g")</td>
+                                    <td>@message.Name</td>
+                                    <td>@message.Email</td>
+                                    <td>@GetSpamReason(message.Message)</td>
+                                    <td>
+                                        <button class="btn btn-sm btn-outline-primary me-1"
+                                                @onclick="() => ViewMessage(message)">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-success me-1"
+                                                title="Promote to Inbox"
+                                                @onclick="() => PromoteMessage(message.Id)">
+                                            <i class="fas fa-arrow-up"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-danger"
+                                                @onclick="() => DeleteMessage(message.Id)">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        }
     </div>
 </div>
 
@@ -183,7 +232,7 @@
                     <hr />
                     @if (IsJobApplication(selectedMessage))
                     {
-                        var items = BuildJobApplicationBulletItems(selectedMessage.Message);
+                        var items = BuildJobApplicationBulletItems(GetDisplayMessage(selectedMessage.Message));
                         <ul class="mb-0">
                             @foreach (var item in items)
                             {
@@ -193,7 +242,7 @@
                     }
                     else
                     {
-                        <p class="mb-0" style="white-space: pre-wrap;">@selectedMessage.Message</p>
+                        <p class="mb-0" style="white-space: pre-wrap;">@GetDisplayMessage(selectedMessage.Message)</p>
                     }
                 </div>
             </div>
@@ -208,12 +257,52 @@
     private string? notificationError;
 
     private List<MessageViewModel> messages = new();
+    private List<MessageViewModel> inboxMessages = new();
+    private List<MessageViewModel> spamMessages = new();
     private MessageViewModel selectedMessage = new();
     private bool showModal;
+    private const string SpamPrefix = "[SPAM]";
+
+    private static bool IsSpamMessage(MessageViewModel message)
+        => message.Message.StartsWith(SpamPrefix, StringComparison.OrdinalIgnoreCase);
+
+    private static string GetDisplayMessage(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return string.Empty;
+        }
+
+        if (!message.StartsWith(SpamPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return message;
+        }
+
+        var split = message.Split("\n\n", 2, StringSplitOptions.None);
+        return split.Length == 2 ? split[1] : message;
+    }
+
+    private static string GetSpamReason(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return "unknown";
+        }
+
+        var firstLine = message.Split('\n', 2, StringSplitOptions.None)[0];
+        var marker = "reason=";
+        var idx = firstLine.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (idx < 0)
+        {
+            return "unknown";
+        }
+
+        return firstLine[(idx + marker.Length)..].Trim();
+    }
 
     private static bool IsJobApplication(MessageViewModel message)
         => !string.IsNullOrWhiteSpace(message.Message)
-           && message.Message.TrimStart().StartsWith("Job Application", StringComparison.OrdinalIgnoreCase);
+           && GetDisplayMessage(message.Message).TrimStart().StartsWith("Job Application", StringComparison.OrdinalIgnoreCase);
 
     private static IReadOnlyList<string> BuildJobApplicationBulletItems(string? message)
     {
@@ -293,8 +382,12 @@
         }
     }
 
-    private async Task LoadMessages() => 
+    private async Task LoadMessages()
+    {
         messages = await MessageService.GetAllMessagesAsync();
+        inboxMessages = messages.Where(m => !IsSpamMessage(m)).ToList();
+        spamMessages = messages.Where(IsSpamMessage).ToList();
+    }
 
     private async Task ViewMessage(MessageViewModel message)
     {
@@ -324,5 +417,35 @@
             await MessageService.DeleteMessageAsync(id);
             await LoadMessages();
         }
+    }
+
+    private async Task PromoteMessage(int id)
+    {
+        var confirmed = await JSRuntime.InvokeAsync<bool>(
+            "confirm",
+            "Promote this message from spam to inbox?");
+
+        if (!confirmed)
+        {
+            return;
+        }
+
+        await MessageService.PromoteFromSpamAsync(id);
+        await LoadMessages();
+    }
+
+    private async Task BackfillSpamQueue()
+    {
+        var confirmed = await JSRuntime.InvokeAsync<bool>(
+            "confirm",
+            "Scan existing messages and move likely spam into the Spam Queue?");
+
+        if (!confirmed)
+        {
+            return;
+        }
+
+        await MessageService.BackfillSpamMessagesAsync();
+        await LoadMessages();
     }
 }
