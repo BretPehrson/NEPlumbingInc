@@ -448,6 +448,74 @@
             }
         };
 
+        // ── Global field validators ───────────────────────────────────────────
+        // Called directly from inline oninput/onblur/onsubmit attributes so that
+        // validation is guaranteed to fire regardless of JS wiring timing.
+
+        window.NepValidateEmail = function (input) {
+            var raw = (input.value || '').trim();
+            if (!raw) {
+                input.setCustomValidity('');
+                input.classList.remove('is-invalid', 'is-valid');
+                return true;
+            }
+            var re = /^[^\s@@]+@@[^\s@@]+\.[^\s@@]+$/;
+            if (!re.test(raw)) {
+                input.setCustomValidity('Please enter a valid email address');
+                input.classList.add('is-invalid');
+                input.classList.remove('is-valid');
+                return false;
+            }
+            input.setCustomValidity('');
+            input.classList.remove('is-invalid');
+            input.classList.add('is-valid');
+            return true;
+        };
+
+        window.NepValidatePhone = function (input) {
+            var raw = (input.value || '').trim();
+            if (!raw) {
+                input.setCustomValidity('');
+                input.classList.remove('is-invalid', 'is-valid');
+                return true;
+            }
+            var digitCount = 0;
+            var invalidChar = false;
+            for (var i = 0; i < raw.length; i++) {
+                var ch = raw.charAt(i);
+                if (ch >= '0' && ch <= '9') { digitCount++; continue; }
+                if (ch === ' ' || ch === '(' || ch === ')' || ch === '-' || ch === '.' || ch === '+') continue;
+                invalidChar = true;
+                break;
+            }
+            if (invalidChar || digitCount < 10 || digitCount > 15) {
+                input.setCustomValidity('Please enter a valid phone number');
+                input.classList.add('is-invalid');
+                input.classList.remove('is-valid');
+                return false;
+            }
+            input.setCustomValidity('');
+            input.classList.remove('is-invalid');
+            input.classList.add('is-valid');
+            return true;
+        };
+
+        // Called from onsubmit="return window.NepValidateNepForm(this)" on any form.
+        // Returns false (blocking submit) if any field is invalid.
+        window.NepValidateNepForm = function (form) {
+            var valid = true;
+            form.querySelectorAll('input[type="email"]').forEach(function (el) {
+                if (!window.NepValidateEmail(el)) valid = false;
+            });
+            form.querySelectorAll('input[data-nep-phone="true"]').forEach(function (el) {
+                if (!window.NepValidatePhone(el)) valid = false;
+            });
+            // Let browser check remaining constraints (required, min, pattern, etc.)
+            if (!form.checkValidity()) valid = false;
+            form.classList.add('was-validated');
+            return valid;
+        };
+
         // Bootstrap-style client-side validation for plain HTML forms.
         // Adds inline feedback and blocks submit when invalid.
         window.NepWireUpClientValidation = function () {
@@ -483,8 +551,12 @@
 
                         if (invalidChar || digitCount < 10 || digitCount > 15) {
                             input.setCustomValidity('Please enter a valid phone number');
+                            input.classList.add('is-invalid');
+                            input.classList.remove('is-valid');
                         } else {
                             input.setCustomValidity('');
+                            input.classList.remove('is-invalid');
+                            input.classList.add('is-valid');
                         }
                     };
 
@@ -509,8 +581,12 @@
                         const re = /^[^\s@@]+@@[^\s@@]+\.[^\s@@]+$/;
                         if (!re.test(raw)) {
                             input.setCustomValidity('Please enter a valid email address');
+                            input.classList.add('is-invalid');
+                            input.classList.remove('is-valid');
                         } else {
                             input.setCustomValidity('');
+                            input.classList.remove('is-invalid');
+                            input.classList.add('is-valid');
                         }
                     };
 
@@ -533,6 +609,8 @@
 
                         if (!/^\d+$/.test(raw)) {
                             input.setCustomValidity('Please enter a valid number');
+                            input.classList.add('is-invalid');
+                            input.classList.remove('is-valid');
                             return;
                         }
 
@@ -542,8 +620,12 @@
 
                         if (Number.isNaN(val) || val < min || val > max) {
                             input.setCustomValidity('Please enter a valid number');
+                            input.classList.add('is-invalid');
+                            input.classList.remove('is-valid');
                         } else {
                             input.setCustomValidity('');
+                            input.classList.remove('is-invalid');
+                            input.classList.add('is-valid');
                         }
                     };
 

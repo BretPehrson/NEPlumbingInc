@@ -69,7 +69,7 @@
                             }
                         </div>
 
-                        <form method="post" action="/special-offer/claim" class="needs-validation" novalidate data-nep-validate="true">
+                        <form method="post" action="/special-offer/claim" class="needs-validation" novalidate data-nep-validate="true" onsubmit="return window.NepValidateNepForm(this)">
                             <input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden;" />
                             <input type="text" name="companyWebsite" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden;" />
 
@@ -80,13 +80,13 @@
 
                             <div class="mb-3">
                                 <label class="form-label">Email</label>
-                                <input class="form-control" name="Email" type="email" value="@form.Email" required />
+                                <input class="form-control" name="Email" type="email" value="@form.Email" required oninput="window.NepValidateEmail(this)" onblur="window.NepValidateEmail(this)" />
                                 <div class="invalid-feedback">Please enter a valid email address.</div>
                             </div>
 
                             <div class="mb-3">
                                 <label class="form-label">Phone</label>
-                                <input class="form-control" name="Phone" type="tel" autocomplete="tel" inputmode="tel" value="@form.Phone" data-nep-phone="true" />
+                                <input class="form-control" name="Phone" type="tel" autocomplete="tel" inputmode="tel" value="@form.Phone" data-nep-phone="true" oninput="window.NepValidatePhone(this)" onblur="window.NepValidatePhone(this)" />
                                 <div class="invalid-feedback">Please enter a valid phone number (10-15 digits).</div>
                             </div>
 

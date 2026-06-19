@@ -6,7 +6,7 @@
       "type": "coreclr",
       "request": "launch",
       "preLaunchTask": "build",
-      "program": "${workspaceFolder}/NEPlumbingInc/bin/Debug/net8.0/NEPlumbingInc.dll",
+      "program": "${workspaceFolder}/NEPlumbingInc/bin/Debug/net10.0/NEPlumbingInc.dll",
       "args": [],
       "cwd": "${workspaceFolder}/NEPlumbingInc",
       "stopAtEntry": false,
