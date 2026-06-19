@@ -28,7 +28,8 @@ public class AdminResumesController(
         {
             var (content, contentType) = await _resumeStorageService.OpenResumeReadAsync(message.ResumeBlobName, cancellationToken);
             var downloadName = string.IsNullOrWhiteSpace(message.ResumeFileName) ? "resume" : message.ResumeFileName;
-            return File(content, contentType, downloadName);
+            // Force download as binary to avoid in-browser rendering/execution
+            return File(content, "application/octet-stream", downloadName);
         }
         catch (FileNotFoundException)
         {

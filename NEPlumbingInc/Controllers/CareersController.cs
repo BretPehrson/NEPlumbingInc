@@ -10,10 +10,12 @@ namespace NEPlumbingInc.Controllers;
 public class CareersController(
     IMessageService messageService,
     IResumeStorageService resumeStorageService,
+    ISpamFilterService spamFilterService,
     ILogger<CareersController> logger) : Controller
 {
     private readonly IMessageService _messageService = messageService;
     private readonly IResumeStorageService _resumeStorageService = resumeStorageService;
+    private readonly ISpamFilterService _spamFilterService = spamFilterService;
     private readonly ILogger<CareersController> _logger = logger;
 
     [HttpPost("/careers/submit")]
@@ -65,7 +67,9 @@ public class CareersController(
                     return Redirect("/careers?error=1");
                 }
 
-                var uploaded = await _resumeStorageService.UploadResumeAsync(created.Id, resume, HttpContext.RequestAborted);
+                // Quarantine resume uploads for submissions that look like spam
+                var spamCheck = _spamFilterService.Check(messageForm);
+                var uploaded = await _resumeStorageService.UploadResumeAsync(created.Id, resume, HttpContext.RequestAborted, quarantine: spamCheck.IsSpam);
                 await _messageService.AttachResumeAsync(created.Id, uploaded, HttpContext.RequestAborted);
             }
 
@@ -90,9 +94,8 @@ public class CareersController(
         var ext = Path.GetExtension(fileName);
         if (string.IsNullOrWhiteSpace(ext)) return false;
 
-        return ext.Equals(".pdf", StringComparison.OrdinalIgnoreCase)
-               || ext.Equals(".doc", StringComparison.OrdinalIgnoreCase)
-               || ext.Equals(".docx", StringComparison.OrdinalIgnoreCase);
+         return ext.Equals(".pdf", StringComparison.OrdinalIgnoreCase)
+             || ext.Equals(".docx", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string BuildApplicationMessage(JobApplicationFormModel form)

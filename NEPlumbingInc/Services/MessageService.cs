@@ -8,6 +8,7 @@ public interface IMessageService
     Task<bool> IsRecentDuplicateAsync(MessageFormModel form, bool isSpecialOffer, TimeSpan window);
     Task<MessageViewModel> CreateMessageAsync(MessageFormModel form, bool isSpecialOffer, bool isSpam = false, string? spamReason = null, bool sendEmailNotification = true);
     Task AttachResumeAsync(int messageId, ResumeUploadResult resume, CancellationToken cancellationToken = default);
+    Task<bool> DeleteResumeAsync(int messageId, CancellationToken cancellationToken = default);
     Task PromoteFromSpamAsync(int id);
     Task MarkAsSpamAsync(int id, string reason = "manual-review");
     Task<int> BackfillSpamMessagesAsync();
@@ -19,6 +20,7 @@ public class MessageService(
     IDbContextFactory<AppDbContext> contextFactory,
     IEmailService emailService,
     ISpamFilterService spamFilterService,
+    IResumeStorageService resumeStorageService,
     ILogger<MessageService> logger) : IMessageService
 {
     public const string SpamPrefix = "[SPAM]";
@@ -26,6 +28,7 @@ public class MessageService(
     private readonly IDbContextFactory<AppDbContext> _contextFactory = contextFactory;
     private readonly IEmailService _emailService = emailService;
     private readonly ISpamFilterService _spamFilterService = spamFilterService;
+    private readonly IResumeStorageService _resumeStorageService = resumeStorageService;
     private readonly ILogger<MessageService> _logger = logger;
 
     public async Task<int> GetUnreadCountAsync()
@@ -163,7 +166,7 @@ public class MessageService(
     public async Task AttachResumeAsync(int messageId, ResumeUploadResult resume, CancellationToken cancellationToken = default)
     {
         using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
-        var message = await context.Messages.FindAsync([messageId], cancellationToken)
+        var message = await context.Messages.FindAsync(messageId, cancellationToken)
             ?? throw new KeyNotFoundException($"Message {messageId} not found");
 
         message.ResumeBlobName = resume.BlobName;
@@ -172,6 +175,29 @@ public class MessageService(
         message.ResumeSizeBytes = resume.SizeBytes;
 
         await context.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<bool> DeleteResumeAsync(int messageId, CancellationToken cancellationToken = default)
+    {
+        using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        var message = await context.Messages.FindAsync(messageId, cancellationToken)
+            ?? throw new KeyNotFoundException($"Message {messageId} not found");
+
+        if (string.IsNullOrWhiteSpace(message.ResumeBlobName)) return false;
+
+        var blobName = message.ResumeBlobName;
+        var deleted = await _resumeStorageService.DeleteResumeAsync(blobName, cancellationToken);
+
+        if (deleted)
+        {
+            message.ResumeBlobName = null;
+            message.ResumeFileName = null;
+            message.ResumeContentType = null;
+            message.ResumeSizeBytes = null;
+            await context.SaveChangesAsync(cancellationToken);
+        }
+
+        return deleted;
     }
 
     public async Task PromoteFromSpamAsync(int id)

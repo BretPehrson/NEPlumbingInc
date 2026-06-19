@@ -236,6 +236,10 @@
                                 <i class="fas fa-file-arrow-down me-1"></i>
                                 Download
                             </a>
+                            <button class="btn btn-sm btn-outline-danger ms-2" @onclick="() => DeleteResume(selectedMessage.Id)">
+                                <i class="fas fa-trash me-1"></i>
+                                Delete Resume
+                            </button>
                         </p>
                     }
                     <p><strong>Date:</strong> @selectedMessage.CreatedAt.ToLocalTime().ToString("g")</p>
@@ -428,6 +432,30 @@
         {
             await MessageService.DeleteMessageAsync(id);
             await LoadMessages();
+        }
+    }
+
+    private async Task DeleteResume(int messageId)
+    {
+        var confirmed = await JSRuntime.InvokeAsync<bool>("confirm", "Delete the attached resume file from storage?");
+        if (!confirmed) return;
+
+        try
+        {
+            var deleted = await MessageService.DeleteResumeAsync(messageId);
+            if (deleted)
+            {
+                await LoadMessages();
+                await JSRuntime.InvokeVoidAsync("alert", "Resume deleted.");
+            }
+            else
+            {
+                await JSRuntime.InvokeVoidAsync("alert", "No resume found or deletion failed.");
+            }
+        }
+        catch (Exception ex)
+        {
+            await JSRuntime.InvokeVoidAsync("alert", "Error deleting resume: " + ex.Message);
         }
     }
 
