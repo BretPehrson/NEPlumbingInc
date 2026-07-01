@@ -1,6 +1,8 @@
 ﻿@page "/messages"
 @page "/message"
+@using Microsoft.AspNetCore.DataProtection
 @inject NavigationManager NavigationManager
+@inject IDataProtectionProvider DataProtectionProvider
 
 <PageTitle>Contact Us - NE Plumbing Inc.</PageTitle>
 
@@ -17,6 +19,7 @@
 
                     <form method="post" action="/messages/submit" class="needs-validation" novalidate data-nep-validate="true" onsubmit="return window.NepValidateNepForm(this)">
                         <input type="hidden" name="source" value="@source" />
+                        <input type="hidden" name="formTimingToken" value="@formTimingToken" />
                         <input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden;" />
                         <input type="text" name="companyWebsite" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden;" />
 
@@ -70,11 +73,14 @@
     private string? source;
     private string? serviceName;
     private string? consultationType;
+    private string formTimingToken = string.Empty;
     private bool showSuccess;
     private bool showError;
 
     protected override void OnInitialized()
     {
+        formTimingToken = CreateFormTimingToken();
+
         var uri = new Uri(NavigationManager.Uri);
         var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
         
@@ -121,5 +127,12 @@
                     "Additional details: ";
             }
         }
+    }
+
+    private string CreateFormTimingToken()
+    {
+        var protector = DataProtectionProvider.CreateProtector("NEPlumbingInc.ContactFormTiming.v1");
+        var issuedAtUnixMilliseconds = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
+        return protector.Protect(issuedAtUnixMilliseconds);
     }
 }

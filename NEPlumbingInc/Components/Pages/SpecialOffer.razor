@@ -1,11 +1,13 @@
 @page "/special-offer"
 @attribute [AllowAnonymous]
+@using Microsoft.AspNetCore.DataProtection
 @using NEPlumbingInc.Models
 @using NEPlumbingInc.Services
 @inject ISpecialOfferSettingsService SpecialOfferSettingsService
 @inject ISpecialOfferService SpecialOfferService
 @inject NavigationManager NavigationManager
 @inject IHttpContextAccessor HttpContextAccessor
+@inject IDataProtectionProvider DataProtectionProvider
 
 <PageTitle>Special Offer - NE Plumbing Inc.</PageTitle>
 
@@ -70,6 +72,7 @@
                         </div>
 
                         <form method="post" action="/special-offer/claim" class="needs-validation" novalidate data-nep-validate="true" onsubmit="return window.NepValidateNepForm(this)">
+                            <input type="hidden" name="formTimingToken" value="@formTimingToken" />
                             <input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden;" />
                             <input type="text" name="companyWebsite" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden;" />
 
@@ -147,6 +150,7 @@
 
     private bool showSuccess;
     private bool showError;
+    private string formTimingToken = string.Empty;
 
     private string? noOfferHeading;
     private string? noOfferDescription;
@@ -155,6 +159,8 @@
 
     protected override async Task OnInitializedAsync()
     {
+        formTimingToken = CreateFormTimingToken();
+
         var uri = new Uri(NavigationManager.Uri);
         var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
 
@@ -201,5 +207,12 @@
         {
             form.Message = $"Claiming offer: {settings.OfferTitle}";
         }
+    }
+
+    private string CreateFormTimingToken()
+    {
+        var protector = DataProtectionProvider.CreateProtector("NEPlumbingInc.ContactFormTiming.v1");
+        var issuedAtUnixMilliseconds = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
+        return protector.Protect(issuedAtUnixMilliseconds);
     }
 }
