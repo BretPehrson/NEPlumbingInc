@@ -1,109 +1,152 @@
 # NEPlumbingInc
 
-NEPlumbingInc is a Blazor-based website for a local plumbing company, built with C# and hosted on Azure.
-
-The site includes public pages for customers, a careers section, and admin tools for managing content, colors, messages, and website metrics.
+NEPlumbingInc is a Blazor web application for NE Plumbing Inc., combining a public marketing site with authenticated admin tooling for content, theme, leads, and website operations.
 
 ## Overview
 
-This application is designed to support NE Plumbing Inc.’s online presence and internal site management. It provides:
+This repository contains a server-rendered Blazor app (interactive server components) built on ASP.NET Core and EF Core.  
+It supports customer-facing pages, lead capture, recruiting workflows, and internal management features used by admins.
 
-- A public marketing website
-- Service and home page content management
-- A careers page and application form
-- An authenticated admin dashboard
-- Website metrics and message management
-- Theme customization, including light/dark mode support
+## Key Features
 
-## Features
+### Public website
+- Home page with editable hero/content blocks
+- Services catalog with service detail modals and image delivery via API
+- Contact form (`/messages`) and special-offer claim flow (`/special-offer`)
+- Careers application flow (`/careers`) with optional resume upload
+- NE Underground promo page (`/ne-underground`)
+- Global light/dark mode support
 
-### Public Site
-- Home page with editable content
-- Services page
-- Careers page
-- Contact and message submission flow
-- Responsive layout and navigation
+### Admin tools
+- Protected admin dashboard (`/admin-dashboard`)
+- Manage home page content, services, careers content, and special offers
+- Manage fonts/colors/theme tokens for light and dark palettes
+- Message inbox with read/spam states and resume attachment management
+- User management and website metrics dashboards
+- Configurable message notification recipients
 
-### Admin Tools
-- Protected admin dashboard
-- Manage home page content
-- Manage services
-- Manage colors and theme settings
-- View and manage website messages
-- View website metrics
-- User/admin authentication and authorization
+### Security and anti-spam controls
+- Cookie-based admin authentication (`/auth/login`, `/auth/logout`)
+- Rate limiting on form submissions
+- Honeypot fields, timing-token checks, duplicate detection, sender burst protection, and spam scoring
+- Resume file-size/type/signature validation before storage
 
-### Platform / Tech
-- Blazor
-- ASP.NET Core
-- C#
-- Entity Framework Core
-- ASP.NET Identity
-- Azure hosting
+## Architecture
 
-## Project Structure
+- **UI:** Blazor components in `NEPlumbingInc/Components`
+- **Backend:** ASP.NET Core controllers in `NEPlumbingInc/Controllers`
+- **Data access:** EF Core SQL Server context in `NEPlumbingInc/Data/AppDbContext.cs`
+- **Storage:** Azure Blob Storage services for resumes and service images (production), local service image storage in development
+- **Metrics:** custom middleware logs page visits (`NEPlumbingInc/Middleware/PageVisitLoggingMiddleware.cs`)
+- **Startup:** `NEPlumbingInc/Program.cs` configures DI, auth, rate limiting, controllers, Razor components, and startup migration/seed retries
 
-Some of the main areas of the app include:
+## Repository Structure
 
-- `Components/App.razor` — root HTML shell and early theme initialization
-- `Components/Routes.razor` — router and authorization handling
-- `Components/Layout/MainLayout.razor` — shared layout, navigation, and footer
-- `Components/Pages/Home.razor` — public home page
-- `Components/Pages/Services.razor` — services page
-- `Components/Pages/Careers.razor` — careers page
-- `Components/Pages/AdminDashboard.razor` — protected admin dashboard
-- `Components/ManageHomePageContent.razor` — home page content editor
-- `Components/ManageColors.razor` — theme/color settings editor
-- `Components/ManageWebsiteMetrics.razor` — site analytics and metrics
-- `Data/AppDbContext.cs` — database context and entity configuration
-- `Migrations/` — Entity Framework Core migrations
+- `/NEPlumbingInc` - main ASP.NET Core app
+  - `Components/Pages` - public/admin pages and account views
+  - `Components/Manage*.razor` - admin management modules
+  - `Controllers` - form/API endpoints (contact, careers, auth, service images, offers, resume access)
+  - `Services` - business logic, storage adapters, spam/email/theme/content services
+  - `Data` - EF Core context, factory, seeding
+  - `Migrations` - EF Core schema history
+  - `wwwroot` - static assets and styles
+- `docker-compose.yml` - local SQL Server container
+- `.github/workflows/deploy.yml` - Azure App Service build/deploy workflow
 
-## Getting Started
+## Prerequisites
 
-### Prerequisites
-- .NET SDK
-- SQL Server or the database configured in the application
-- Visual Studio or Visual Studio Code
+- .NET SDK compatible with `net10.0` (see `NEPlumbingInc/NEPlumbingInc.csproj`)
+- SQL Server (local instance or containerized)
+- Optional: Azure Storage account for blob-backed resumes/service images
+- Optional: Gmail app password for email notifications
 
-### Run Locally
+## Local Setup
 
-1. Clone the repository:
+1. Clone and enter the repository:
    ```bash
    git clone https://github.com/BretPehrson/NEPlumbingInc.git
    cd NEPlumbingInc
    ```
 
-2. Restore dependencies:
+2. Start SQL Server with Docker (recommended):
    ```bash
-   dotnet restore
+   cp .env.example .env
+   docker compose up -d
+   ```
+   Update `.env` with a strong `SA_PASSWORD` before first use.
+
+3. Configure app settings for development:
+   - `NEPlumbingInc/appsettings.Development.json`
+   - or user-secrets/environment variables
+
+4. Restore and run:
+   ```bash
+   dotnet restore NEPlumbingInc.sln
+   dotnet run --project NEPlumbingInc/NEPlumbingInc.csproj
    ```
 
-3. Run the app:
-   ```bash
-   dotnet run
-   ```
-
-4. Open the site in your browser using the URL shown in the terminal.
+5. Browse to the local URL from launch settings (for example `https://localhost:7162`).
 
 ## Configuration
 
-This project uses application settings for things like:
+### Database connection
+`Program.cs` resolves `DefaultConnection` from several keys (first non-empty value wins), including:
+- `ConnectionStrings:DefaultConnection`
+- `ConnectionStrings__DefaultConnection`
+- `DefaultConnection`
+- `SQLAZURECONNSTR_DefaultConnection`
+- `SQLCONNSTR_DefaultConnection`
+- `CUSTOMCONNSTR_DefaultConnection`
 
-- database connection
-- authentication / identity
-- Azure deployment settings
-- theme and content management data
+### Storage settings
+- `ResumeBlobStorage:ConnectionString`
+- `ResumeBlobStorage:ResumeContainer` (default: `resumes`)
+- `ServiceImageBlobStorage:ConnectionString`
+- `ServiceImageBlobStorage:ServiceImageContainer` (default: `service-images`)
+- `ServiceImageBlobStorage:LocalStoragePath` (development/local image storage path)
 
-Check the app configuration files and environment-specific settings before deploying.
+### Email settings
+- `Email:From`
+- `Email:To` (fallback recipient)
+- `Email:AppPassword`
 
-## Deployment
+### Other notable behavior
+- Startup applies EF migrations and seed logic with retries.
+- A default admin login record is seeded when no login users exist.
+- Development uses local file storage for service images; non-development uses blob storage service.
 
-The site is hosted on Azure. When deploying, make sure the production configuration includes:
+## Authentication
 
-- the correct database connection string
-- identity/authentication settings
-- any required Azure app settings
-- updated build/publish configuration
+- Admin login UI: `/account/login`
+- Auth endpoints: `/auth/login` and `/auth/logout`
+- Admin pages require authentication (dashboard and admin APIs)
+
+## Deployment (Azure App Service)
+
+This repository includes a GitHub Actions workflow at `.github/workflows/deploy.yml` that:
+1. Restores dependencies
+2. Publishes the app
+3. Packages publish output
+4. Deploys to Azure App Service (`azure/webapps-deploy`)
+
+### Required GitHub secret
+- `AZURE_CREDENTIALS` (service principal JSON for `azure/login`)
+
+### Required Azure app settings
+Set production app settings for:
+- database connection string (DefaultConnection)
+- blob storage connection strings/containers
+- email credentials (`Email__From`, `Email__To`, `Email__AppPassword`)
+- any additional environment overrides used by your environment
+
+> Note: The project targets `net10.0`, so ensure your CI/deployment SDK version matches the target framework.
+
+## Build and Test
+
+```bash
+dotnet build NEPlumbingInc.sln
+dotnet test NEPlumbingInc.sln
+```
 
 ## License
 
